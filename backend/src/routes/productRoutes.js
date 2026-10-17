@@ -1,5 +1,6 @@
 
 import { Router } from 'express'
+
 import {
   listProducts,
   getProduct,
@@ -11,14 +12,27 @@ import {
   changeProductStatus,
   deleteAdminProduct,
 } from '../controllers/productController.js'
-import { protect, authorize } from '../middleware/authMiddleware.js'
+
+import {
+  getProductReviews,
+  createProductReview,
+  updateMyProductReview,
+  deleteMyProductReview,
+} from '../controllers/reviewController.js'
+
+import {
+  protect,
+  authorize,
+} from '../middleware/authMiddleware.js'
 
 const router = Router()
 
 // Public routes
-// Keep these routes before /:slug.
 router.get('/', listProducts)
 router.get('/categories', listCategories)
+
+// Public product reviews
+router.get('/:productId/reviews', getProductReviews)
 
 // Admin routes: administrator access required
 router.get(
@@ -61,6 +75,28 @@ router.delete(
   protect,
   authorize('admin'),
   deleteAdminProduct
+)
+
+// Customer review management
+router.post(
+  '/:productId/reviews',
+  protect,
+  authorize('customer'),
+  createProductReview
+)
+
+router.put(
+  '/:productId/reviews/mine',
+  protect,
+  authorize('customer'),
+  updateMyProductReview
+)
+
+router.delete(
+  '/:productId/reviews/mine',
+  protect,
+  authorize('customer'),
+  deleteMyProductReview
 )
 
 // Public product details route must remain last

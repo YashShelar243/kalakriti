@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useState } from 'react'
 import {
   Search,
@@ -11,6 +10,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react'
+import { upload } from '@imagekit/javascript'
 import api from '../../services/api'
 
 const emptyForm = {
@@ -19,6 +19,7 @@ const emptyForm = {
   description: '',
   price: '',
   stock_quantity: '0',
+  size: '',
   image_url: '',
   is_featured: false,
   is_active: true,
@@ -49,6 +50,20 @@ export default function ManageProducts() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null)
   const [form, setForm] = useState(emptyForm)
+  const [selectedImage, setSelectedImage] = useState(null)
+  const [localPreview, setLocalPreview] = useState('')
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setLocalPreview('')
+      return undefined
+    }
+
+    const previewUrl = URL.createObjectURL(selectedImage)
+    setLocalPreview(previewUrl)
+
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [selectedImage])
 
   const pageSize = 10
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -70,6 +85,7 @@ export default function ManageProducts() {
 
       if (search.trim()) params.search = search.trim()
       if (categoryId) params.categoryId = categoryId
+
       if (activeFilter !== 'all') {
         params.active = activeFilter === 'active' ? 'true' : 'false'
       }
@@ -104,6 +120,7 @@ export default function ManageProducts() {
   function openAddModal() {
     setEditingProduct(null)
     setForm({ ...emptyForm })
+    setSelectedImage(null)
     setError('')
     setMessage('')
     setModalOpen(true)
@@ -111,6 +128,7 @@ export default function ManageProducts() {
 
   function openEditModal(product) {
     setEditingProduct(product)
+    setSelectedImage(null)
 
     setForm({
       name: product.name || '',
@@ -120,6 +138,7 @@ export default function ManageProducts() {
       description: product.description || '',
       price: String(product.price ?? ''),
       stock_quantity: String(product.stock_quantity ?? 0),
+      size: product.size || '',
       image_url: product.image_url || '',
       is_featured: Boolean(product.is_featured),
       is_active: Boolean(product.is_active),
@@ -132,9 +151,39 @@ export default function ManageProducts() {
 
   function closeModal() {
     if (saving) return
+
     setModalOpen(false)
     setEditingProduct(null)
     setForm({ ...emptyForm })
+    setSelectedImage(null)
+    setError('')
+  }
+
+  function handleImageChange(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+    ]
+
+    if (!allowedTypes.includes(file.type)) {
+      setError('Choose a JPG, PNG, WebP, or GIF image.')
+      event.target.value = ''
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be 5 MB or smaller.')
+      event.target.value = ''
+      return
+    }
+
+    setError('')
+    setSelectedImage(file)
   }
 
   function handleChange(event) {
@@ -146,18 +195,59 @@ export default function ManageProducts() {
     }))
   }
 
+  async function uploadSelectedImage() {
+    const authResponse = await api.get('/uploads/auth')
+    const authParams = authResponse.data?.data
+
+    if (
+      !authParams?.token ||
+      !authParams?.signature ||
+      !authParams?.expire ||
+      !authParams?.publicKey
+    ) {
+      throw new Error(
+        'Image upload authentication is incomplete. Check your backend upload route.'
+      )
+    }
+
+    const uploadedImage = await upload({
+      file: selectedImage,
+      fileName: selectedImage.name,
+      token: authParams.token,
+      signature: authParams.signature,
+      expire: authParams.expire,
+      publicKey: authParams.publicKey,
+      folder: '/kalakriti/products',
+      useUniqueFileName: true,
+    })
+
+    if (!uploadedImage?.url) {
+      throw new Error('ImageKit did not return an image URL.')
+    }
+
+    return uploadedImage.url
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
+
     setSaving(true)
     setError('')
     setMessage('')
 
     try {
+      let imageUrl = form.image_url.trim()
+
+      if (selectedImage) {
+        imageUrl = await uploadSelectedImage()
+      }
+
       const payload = {
         ...form,
         category_id: form.category_id || null,
         price: form.price,
         stock_quantity: form.stock_quantity,
+        image_url: imageUrl,
       }
 
       if (editingProduct) {
@@ -165,6 +255,7 @@ export default function ManageProducts() {
           `/products/admin/${editingProduct.id}`,
           payload
         )
+
         setMessage('Product updated successfully.')
       } else {
         await api.post('/products', payload)
@@ -174,10 +265,13 @@ export default function ManageProducts() {
       setModalOpen(false)
       setEditingProduct(null)
       setForm({ ...emptyForm })
+      setSelectedImage(null)
+
       await fetchProducts()
     } catch (err) {
       setError(
         err.response?.data?.message ||
+          err.message ||
           'Unable to save product. Please check the details.'
       )
     } finally {
@@ -730,12 +824,51 @@ export default function ManageProducts() {
                   />
                 </div>
 
-                <div>
+                <div className="sm:col-span-2">
                   <label
-                    htmlFor="product-image"
+                    htmlFor="product-size"
                     className="mb-2 block text-sm font-semibold text-[#54232A]"
                   >
-                    Product image URL
+                    Product Size
+                  </label>
+                  <input
+                    id="product-size"
+                    name="size"
+                    type="text"
+                    maxLength={100}
+                    value={form.size}
+                    onChange={handleChange}
+                    placeholder="e.g. 20 cm × 10 cm"
+                    className="w-full rounded-xl border border-[#DCCBB8] bg-white px-4 py-3 outline-none focus:border-[#762C36]"
+                  />
+                  <p className="mt-2 text-xs text-stone-500">
+                    Enter dimensions, diameter, or a size label. Optional.
+                  </p>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label
+                    htmlFor="product-image-file"
+                    className="mb-2 block text-sm font-semibold text-[#54232A]"
+                  >
+                    Choose product image
+                  </label>
+                  <input
+                    id="product-image-file"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    onChange={handleImageChange}
+                    className="block w-full cursor-pointer rounded-xl border border-[#DCCBB8] bg-white text-sm text-stone-600 file:mr-4 file:cursor-pointer file:border-0 file:bg-[#F3E6D2] file:px-4 file:py-3 file:font-semibold file:text-[#54232A] hover:file:bg-[#EAD8BF]"
+                  />
+                  <p className="mt-2 text-xs text-stone-500">
+                    JPG, PNG, WebP or GIF. Maximum file size: 5 MB.
+                  </p>
+
+                  <label
+                    htmlFor="product-image"
+                    className="mt-3 block text-xs text-stone-500"
+                  >
+                    Or use an existing image URL
                   </label>
                   <input
                     id="product-image"
@@ -744,18 +877,18 @@ export default function ManageProducts() {
                     value={form.image_url}
                     onChange={handleChange}
                     placeholder="https://example.com/image.jpg"
-                    className="w-full rounded-xl border border-[#DCCBB8] bg-white px-4 py-3 outline-none focus:border-[#762C36]"
+                    className="mt-2 w-full rounded-xl border border-[#DCCBB8] bg-white px-4 py-3 outline-none focus:border-[#762C36]"
                   />
                 </div>
               </div>
 
-              {form.image_url && (
+              {(localPreview || form.image_url) && (
                 <div>
                   <p className="mb-2 text-sm font-semibold text-[#54232A]">
                     Image preview
                   </p>
                   <img
-                    src={form.image_url}
+                    src={localPreview || form.image_url}
                     alt="Product preview"
                     className="h-36 w-36 rounded-xl border border-[#E9DCCB] object-cover"
                     onError={(event) => {
@@ -765,6 +898,11 @@ export default function ManageProducts() {
                       event.currentTarget.style.display = 'block'
                     }}
                   />
+                  {localPreview && (
+                    <p className="mt-2 text-xs text-stone-500">
+                      Image selected. It will upload when you save the product.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -827,7 +965,7 @@ export default function ManageProducts() {
                   className="rounded-xl bg-[#762C36] px-6 py-3 font-semibold text-white hover:bg-[#54232A] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving
-                    ? 'Saving...'
+                    ? 'Uploading and saving...'
                     : editingProduct
                       ? 'Save Changes'
                       : 'Add Product'}

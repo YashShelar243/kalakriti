@@ -1,6 +1,6 @@
 
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,7 +10,11 @@ import {
   ShieldCheck,
   LoaderCircle,
   CheckCircle2,
+  AlertCircle,
+  Plus,
+  MapPinned,
 } from 'lucide-react'
+
 import Button from '../components/Button'
 import { useCart } from '../context/CartContext'
 import api from '../services/api'
@@ -23,7 +27,6 @@ function formatPrice(price) {
 }
 
 function Checkout() {
-  const navigate = useNavigate()
   const { cartItems, cartCount, subtotal, clearCart } = useCart()
 
   const [formData, setFormData] = useState({
@@ -37,6 +40,11 @@ function Checkout() {
     paymentMethod: 'cod',
   })
 
+  const [savedAddresses, setSavedAddresses] = useState([])
+  const [selectedAddressId, setSelectedAddressId] = useState('')
+  const [addressesLoading, setAddressesLoading] = useState(true)
+  const [addressLoadError, setAddressLoadError] = useState('')
+
   const [errors, setErrors] = useState({})
   const [formMessage, setFormMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -44,6 +52,90 @@ function Checkout() {
 
   const shippingCharge = subtotal >= 999 ? 0 : 60
   const total = subtotal + shippingCharge
+
+  const loadSavedAddresses = useCallback(async () => {
+    try {
+      setAddressesLoading(true)
+      setAddressLoadError('')
+
+      const response = await api.get('/addresses')
+      const addresses = response.data?.data || []
+
+      setSavedAddresses(addresses)
+
+      const defaultAddress = addresses.find(
+        (address) => address.is_default
+      )
+
+      if (defaultAddress) {
+        applyAddress(defaultAddress)
+      }
+    } catch (error) {
+      setAddressLoadError(
+        error.response?.data?.message ||
+          'Unable to load saved addresses. You can enter your address manually.'
+      )
+    } finally {
+      setAddressesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadSavedAddresses()
+  }, [loadSavedAddresses])
+
+  function applyAddress(address) {
+    setSelectedAddressId(String(address.id))
+
+    setFormData((current) => ({
+      ...current,
+      name: address.full_name || '',
+      phone: address.phone || '',
+      address: [
+        address.address_line1,
+        address.address_line2,
+      ]
+        .filter(Boolean)
+        .join(', '),
+      city: address.city || '',
+      state: address.state || '',
+      pincode: address.postal_code || '',
+    }))
+
+    setErrors({})
+    setFormMessage('')
+  }
+
+  function handleSavedAddressChange(event) {
+    const value = event.target.value
+
+    setFormMessage('')
+    setErrors({})
+
+    if (!value) {
+      setSelectedAddressId('')
+
+      setFormData((current) => ({
+        ...current,
+        name: '',
+        phone: '',
+        address: '',
+        city: '',
+        state: 'Maharashtra',
+        pincode: '',
+      }))
+
+      return
+    }
+
+    const address = savedAddresses.find(
+      (item) => String(item.id) === value
+    )
+
+    if (address) {
+      applyAddress(address)
+    }
+  }
 
   function handleChange(event) {
     const { name, value } = event.target
@@ -111,7 +203,9 @@ function Checkout() {
     if (isSubmitting) return
 
     if (cartItems.length === 0) {
-      setFormMessage('Your shopping bag is empty. Add a product before checkout.')
+      setFormMessage(
+        'Your shopping bag is empty. Add a product before checkout.'
+      )
       return
     }
 
@@ -148,13 +242,12 @@ function Checkout() {
       const result = response.data
 
       if (!result?.success || !result?.data) {
-        throw new Error(result?.message || 'Unable to place your order.')
+        throw new Error(
+          result?.message || 'Unable to place your order.'
+        )
       }
 
-      // Keep the order confirmation before clearing the cart.
       setCompletedOrder(result.data)
-
-      // Clear the cart only after the backend confirms success.
       clearCart()
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (error) {
@@ -189,7 +282,9 @@ function Checkout() {
 
   function fieldError(name) {
     return errors[name] ? (
-      <p className="mt-1 text-xs text-red-600">{errors[name]}</p>
+      <p className="mt-1 text-xs text-red-600">
+        {errors[name]}
+      </p>
     ) : null
   }
 
@@ -215,21 +310,27 @@ function Checkout() {
 
         <div className="mt-7 w-full rounded-2xl border border-gold/30 bg-ivory/50 p-5 text-left">
           <div className="flex items-center justify-between gap-4">
-            <span className="text-sm text-burgundy/70">Order number</span>
+            <span className="text-sm text-burgundy/70">
+              Order number
+            </span>
             <span className="break-all text-right font-semibold text-maroon">
               {completedOrder.order_number}
             </span>
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-4 border-t border-gold/20 pt-4">
-            <span className="text-sm text-burgundy/70">Order total</span>
+            <span className="text-sm text-burgundy/70">
+              Order total
+            </span>
             <span className="text-lg font-semibold text-maroon">
               {formatPrice(completedOrder.total_amount)}
             </span>
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-4 border-t border-gold/20 pt-4">
-            <span className="text-sm text-burgundy/70">Payment</span>
+            <span className="text-sm text-burgundy/70">
+              Payment
+            </span>
             <span className="text-sm font-medium text-burgundy">
               Cash on Delivery
             </span>
@@ -321,6 +422,73 @@ function Checkout() {
                   </div>
                 </div>
 
+                {/* Saved address selector */}
+                <div className="mb-6 rounded-xl border border-gold/25 bg-ivory/30 p-4">
+                  <div className="flex items-center gap-2">
+                    <MapPinned size={18} className="text-maroon" />
+                    <label
+                      htmlFor="saved-address"
+                      className="text-sm font-semibold text-burgundy"
+                    >
+                      Use a Saved Address
+                    </label>
+                  </div>
+
+                  {addressesLoading ? (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-burgundy/70">
+                      <LoaderCircle
+                        size={16}
+                        className="animate-spin"
+                      />
+                      Loading saved addresses...
+                    </div>
+                  ) : (
+                    <select
+                      id="saved-address"
+                      value={selectedAddressId}
+                      onChange={handleSavedAddressChange}
+                      className={inputClass}
+                    >
+                      <option value="">
+                        Enter a new address manually
+                      </option>
+
+                      {savedAddresses.map((address) => (
+                        <option
+                          key={address.id}
+                          value={String(address.id)}
+                        >
+                          {address.address_type} — {address.full_name},{' '}
+                          {address.city}
+                          {address.is_default ? ' (Default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {addressLoadError && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      {addressLoadError}
+                    </p>
+                  )}
+
+                  {!addressesLoading &&
+                    savedAddresses.length === 0 &&
+                    !addressLoadError && (
+                      <p className="mt-2 text-xs text-burgundy/65">
+                        No saved addresses yet. Enter your details below
+                        or add an address in My Profile.
+                      </p>
+                    )}
+
+                  {selectedAddressId && (
+                    <p className="mt-2 text-xs text-burgundy/65">
+                      Saved address selected. You can change the details
+                      below for this order without changing your saved address.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                   <div className="sm:col-span-2">
                     <label className={labelClass} htmlFor="name">
@@ -332,9 +500,11 @@ function Checkout() {
                       value={formData.name}
                       onChange={handleChange}
                       autoComplete="name"
+                      maxLength={120}
                       placeholder="Enter your full name"
                       className={inputClass}
                       aria-invalid={Boolean(errors.name)}
+                      required
                     />
                     {fieldError('name')}
                   </div>
@@ -353,6 +523,7 @@ function Checkout() {
                       placeholder="you@example.com"
                       className={inputClass}
                       aria-invalid={Boolean(errors.email)}
+                      required
                     />
                     {fieldError('email')}
                   </div>
@@ -373,6 +544,7 @@ function Checkout() {
                       placeholder="10-digit mobile number"
                       className={inputClass}
                       aria-invalid={Boolean(errors.phone)}
+                      required
                     />
                     {fieldError('phone')}
                   </div>
@@ -391,6 +563,7 @@ function Checkout() {
                       placeholder="House number, street, area, landmark"
                       className={`${inputClass} resize-y`}
                       aria-invalid={Boolean(errors.address)}
+                      required
                     />
                     {fieldError('address')}
                   </div>
@@ -408,6 +581,7 @@ function Checkout() {
                       placeholder="Your city"
                       className={inputClass}
                       aria-invalid={Boolean(errors.city)}
+                      required
                     />
                     {fieldError('city')}
                   </div>
@@ -425,6 +599,7 @@ function Checkout() {
                       placeholder="Your state"
                       className={inputClass}
                       aria-invalid={Boolean(errors.state)}
+                      required
                     />
                     {fieldError('state')}
                   </div>
@@ -444,6 +619,7 @@ function Checkout() {
                       placeholder="6-digit PIN code"
                       className={inputClass}
                       aria-invalid={Boolean(errors.pincode)}
+                      required
                     />
                     {fieldError('pincode')}
                   </div>
@@ -506,14 +682,18 @@ function Checkout() {
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-burgundy">{item.name}</p>
+                      <p className="text-sm text-burgundy">
+                        {item.name}
+                      </p>
                       <p className="mt-1 text-xs text-burgundy/60">
                         Qty: {item.quantity}
                       </p>
                     </div>
 
                     <p className="shrink-0 text-sm font-medium text-maroon">
-                      {formatPrice(Number(item.price) * item.quantity)}
+                      {formatPrice(
+                        Number(item.price) * item.quantity
+                      )}
                     </p>
                   </div>
                 ))}
@@ -542,7 +722,9 @@ function Checkout() {
               </div>
 
               <div className="mt-5 flex items-center justify-between gap-3 border-t border-gold/30 pt-5">
-                <span className="font-semibold text-burgundy">Total</span>
+                <span className="font-semibold text-burgundy">
+                  Total
+                </span>
                 <span className="text-xl font-semibold text-maroon">
                   {formatPrice(total)}
                 </span>
@@ -554,8 +736,8 @@ function Checkout() {
                   className="mt-0.5 shrink-0 text-gold"
                 />
                 <p className="text-xs leading-5 text-burgundy/70">
-                  Your order details are submitted securely to the KalaKriti
-                  backend.
+                  Your order details are submitted securely to the
+                  KalaKriti backend.
                 </p>
               </div>
 
@@ -568,7 +750,10 @@ function Checkout() {
                   <span className="inline-flex items-center justify-center gap-2">
                     {isSubmitting ? (
                       <>
-                        <LoaderCircle size={17} className="animate-spin" />
+                        <LoaderCircle
+                          size={17}
+                          className="animate-spin"
+                        />
                         Placing Order...
                       </>
                     ) : (

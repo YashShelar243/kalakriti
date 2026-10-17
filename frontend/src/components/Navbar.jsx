@@ -1,4 +1,3 @@
-
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
@@ -14,6 +13,7 @@ import {
   PlusCircle,
   Store,
   ClipboardList,
+  Tags,
 } from 'lucide-react'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
@@ -94,6 +94,10 @@ function Navbar() {
       return location.pathname === '/admin/products'
     }
 
+    if (path === '/admin/categories') {
+      return location.pathname === '/admin/categories'
+    }
+
     if (path === '/admin/orders') {
       return location.pathname === '/admin/orders'
     }
@@ -127,6 +131,11 @@ function Navbar() {
       label: 'Manage Products',
       href: '/admin/products',
       icon: Package,
+    },
+    {
+      label: 'Manage Categories',
+      href: '/admin/categories',
+      icon: Tags,
     },
     {
       label: 'Manage Orders',
@@ -167,7 +176,9 @@ function Navbar() {
             </span>
 
             <span className="mt-0.5 hidden text-[9px] tracking-[0.2em] text-burgundy sm:block sm:text-[10px]">
-              {isAdmin ? 'ADMIN PANEL' : 'EVERY CREATION TELLS A STORY'}
+              {isAdmin
+                ? 'ADMIN PANEL'
+                : 'EVERY CREATION TELLS A STORY'}
             </span>
           </Link>
 
@@ -296,41 +307,21 @@ function Navbar() {
 
                     {isAdmin ? (
                       <>
-                        <Link
-                          to="/admin/dashboard"
-                          onClick={closeNavigationMenus}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
-                        >
-                          <LayoutDashboard size={17} />
-                          Admin Dashboard
-                        </Link>
+                        {adminNavLinks.map((link) => {
+                          const Icon = link.icon
 
-                        <Link
-                          to="/admin/store-overview"
-                          onClick={closeNavigationMenus}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
-                        >
-                          <Store size={17} />
-                          Store Overview
-                        </Link>
-
-                        <Link
-                          to="/admin/products"
-                          onClick={closeNavigationMenus}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
-                        >
-                          <Package size={17} />
-                          Manage Products
-                        </Link>
-
-                        <Link
-                          to="/admin/orders"
-                          onClick={closeNavigationMenus}
-                          className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
-                        >
-                          <ClipboardList size={17} />
-                          Manage Orders
-                        </Link>
+                          return (
+                            <Link
+                              key={link.href}
+                              to={link.href}
+                              onClick={closeNavigationMenus}
+                              className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
+                            >
+                              <Icon size={17} />
+                              {link.label}
+                            </Link>
+                          )
+                        })}
 
                         <button
                           type="button"
@@ -501,16 +492,14 @@ function Navbar() {
                       My Account
                     </Link>
 
-                    {!isAdmin && (
-                      <Link
-                        to="/my-orders"
-                        onClick={closeMenu}
-                        className="flex items-center gap-2 py-3 text-sm text-maroon"
-                      >
-                        <Package size={17} />
-                        My Orders
-                      </Link>
-                    )}
+                    <Link
+                      to="/my-orders"
+                      onClick={closeMenu}
+                      className="flex items-center gap-2 py-3 text-sm text-maroon"
+                    >
+                      <Package size={17} />
+                      My Orders
+                    </Link>
 
                     <button
                       type="button"

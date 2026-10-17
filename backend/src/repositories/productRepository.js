@@ -43,6 +43,7 @@ export async function findAllProducts({
       p.price,
       p.stock_quantity,
       p.image_url,
+      p.size,
       p.is_featured,
       p.category_id,
       c.name AS category_name,
@@ -70,6 +71,7 @@ export async function findProductBySlug(slug) {
       p.price,
       p.stock_quantity,
       p.image_url,
+      p.size,
       p.is_featured,
       p.category_id,
       c.name AS category_name,
@@ -123,7 +125,8 @@ export async function findAdminProducts({
     conditions.push(
       `(p.name ILIKE $${values.length}
         OR p.slug ILIKE $${values.length}
-        OR p.description ILIKE $${values.length})`
+        OR p.description ILIKE $${values.length}
+        OR p.size ILIKE $${values.length})`
     )
   }
 
@@ -160,6 +163,7 @@ export async function findAdminProducts({
       p.price,
       p.stock_quantity,
       p.image_url,
+      p.size,
       p.is_featured,
       p.is_active,
       p.category_id,
@@ -206,10 +210,11 @@ export async function createProduct(data) {
         price,
         stock_quantity,
         image_url,
+        size,
         is_featured,
         is_active
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `,
     [
@@ -220,6 +225,7 @@ export async function createProduct(data) {
       data.price,
       data.stock_quantity,
       data.image_url,
+      data.size ?? null,
       data.is_featured,
       data.is_active,
     ]
@@ -256,10 +262,11 @@ export async function updateProduct(id, data) {
         price = $5,
         stock_quantity = $6,
         image_url = $7,
-        is_featured = $8,
-        is_active = $9,
+        size = $8,
+        is_featured = $9,
+        is_active = $10,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $10
+      WHERE id = $11
       RETURNING *
     `,
     [
@@ -270,6 +277,7 @@ export async function updateProduct(id, data) {
       data.price,
       data.stock_quantity,
       data.image_url,
+      data.size ?? null,
       data.is_featured,
       data.is_active,
       id,

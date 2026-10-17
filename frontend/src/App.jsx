@@ -15,6 +15,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import ManageOrders from "./pages/admin/ManageOrders";
 import ManageProducts from "./pages/admin/ManageProducts";
 import StoreOverview from "./pages/admin/StoreOverview";
+import ManageCategories from './pages/admin/ManageCategories'
 
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
@@ -59,6 +60,11 @@ function App() {
                   path="/admin/store-overview"
                   element={<StoreOverview />}
                 />
+
+                <Route
+  path="/admin/categories"
+  element={<ManageCategories />}
+/>
               </Route>
 
               {/* Page not found */}
