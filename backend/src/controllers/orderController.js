@@ -22,6 +22,8 @@ const allowedOrderStatuses = [
   'cancelled',
 ]
 
+const allowedPaymentStatuses = ['pending', 'paid', 'failed']
+
 // Create a new order for the authenticated customer
 export async function createOrder(req, res) {
   const {
@@ -29,6 +31,7 @@ export async function createOrder(req, res) {
     items,
     shippingAddress,
     paymentMethod = 'cod',
+    couponCode: rawCouponCode,
   } = req.body ?? {}
 
   const userId = req.user?.id
@@ -97,6 +100,18 @@ export async function createOrder(req, res) {
     })
   }
 
+  const couponCode =
+    typeof rawCouponCode === 'string'
+      ? rawCouponCode.trim().toUpperCase()
+      : ''
+
+  if (couponCode && !/^[A-Z0-9_-]{3,50}$/.test(couponCode)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid promo code format.',
+    })
+  }
+
   const quantities = new Map()
 
   for (const item of items) {
@@ -137,7 +152,6 @@ export async function createOrder(req, res) {
 
     const productIds = [...quantities.keys()].sort((a, b) => a - b)
 
-    // Lock products while checking stock and calculating prices.
     const productResult = await client.query(
       `SELECT id, name, price, stock_quantity
        FROM products
@@ -205,14 +219,113 @@ export async function createOrder(req, res) {
     }
 
     const subtotal = subtotalInPaise / 100
+    let coupon = null
+    let discountAmount = 0
+
+    if (couponCode) {
+      const couponResult = await client.query(
+        `SELECT *
+         FROM coupons
+         WHERE code = $1
+         FOR UPDATE`,
+        [couponCode]
+      )
+
+      if (!couponResult.rows.length) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: 'This promo code does not exist.',
+        })
+      }
+
+      coupon = couponResult.rows[0]
+      const now = Date.now()
+
+      if (!coupon.is_active) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: 'This promo code is inactive.',
+        })
+      }
+
+      if (
+        coupon.starts_at &&
+        new Date(coupon.starts_at).getTime() > now
+      ) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: 'This promo code is not active yet.',
+        })
+      }
+
+      if (
+        coupon.expires_at &&
+        new Date(coupon.expires_at).getTime() <= now
+      ) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: 'This promo code has expired.',
+        })
+      }
+
+      if (
+        coupon.usage_limit !== null &&
+        Number(coupon.used_count) >= Number(coupon.usage_limit)
+      ) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: 'This promo code has reached its usage limit.',
+        })
+      }
+
+      if (subtotal < Number(coupon.min_order_amount)) {
+        await client.query('ROLLBACK')
+
+        return res.status(400).json({
+          success: false,
+          message: `Your order subtotal must be at least ₹${Number(
+            coupon.min_order_amount
+          ).toFixed(2)} to use this promo code.`,
+        })
+      }
+
+      if (coupon.discount_type === 'percentage') {
+        discountAmount =
+          subtotal * (Number(coupon.discount_value) / 100)
+
+        if (coupon.max_discount_amount !== null) {
+          discountAmount = Math.min(
+            discountAmount,
+            Number(coupon.max_discount_amount)
+          )
+        }
+      } else if (coupon.discount_type === 'fixed') {
+        discountAmount = Number(coupon.discount_value)
+      }
+
+      discountAmount =
+        Math.round(Math.min(discountAmount, subtotal) * 100) / 100
+    }
+
     const shippingFee = subtotal >= 999 ? 0 : 60
-    const total = subtotal + shippingFee
+
+    const total =
+      Math.round((subtotal - discountAmount + shippingFee) * 100) / 100
 
     const orderNumber = `KK-${Date.now()}-${Math.floor(
       1000 + Math.random() * 9000
     )}`
 
-    // Save the order against the authenticated customer.
     const orderResult = await client.query(
       `INSERT INTO orders (
         user_id,
@@ -225,11 +338,25 @@ export async function createOrder(req, res) {
         shipping_fee,
         total_amount,
         payment_method,
-        payment_status
+        payment_status,
+        coupon_id,
+        coupon_code,
+        discount_amount
       )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
-      RETURNING id, user_id, order_number, subtotal, shipping_fee,
-                total_amount, payment_method, payment_status, created_at`,
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14)
+      RETURNING
+        id,
+        user_id,
+        order_number,
+        subtotal,
+        shipping_fee,
+        total_amount,
+        payment_method,
+        payment_status,
+        coupon_id,
+        coupon_code,
+        discount_amount,
+        created_at`,
       [
         String(userId),
         orderNumber,
@@ -247,6 +374,9 @@ export async function createOrder(req, res) {
         total,
         'cod',
         'pending',
+        coupon?.id ?? null,
+        coupon?.code ?? null,
+        discountAmount,
       ]
     )
 
@@ -278,6 +408,16 @@ export async function createOrder(req, res) {
          SET stock_quantity = stock_quantity - $1
          WHERE id = $2`,
         [item.quantity, item.productId]
+      )
+    }
+
+    if (coupon) {
+      await client.query(
+        `UPDATE coupons
+         SET used_count = used_count + 1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [coupon.id]
       )
     }
 
@@ -325,32 +465,35 @@ export async function getMyOrders(req, res) {
   try {
     const result = await pool.query(
       `SELECT
-         o.id,
-         o.order_number,
-         o.created_at,
-         o.customer_name,
-         o.customer_email,
-         o.customer_phone,
-         o.shipping_address,
-         o.subtotal,
-         o.shipping_fee,
-         o.total_amount,
-         o.payment_method,
-         o.payment_status,
-         o.order_status,
-         COALESCE(
-           json_agg(
-             json_build_object(
-               'productId', oi.product_id,
-               'name', oi.product_name,
-               'quantity', oi.quantity,
-               'unitPrice', oi.unit_price,
-               'lineTotal', oi.line_total
-             )
-             ORDER BY oi.id
-           ) FILTER (WHERE oi.id IS NOT NULL),
-           '[]'::json
-         ) AS items
+        o.id,
+        o.order_number,
+        o.created_at,
+        o.customer_name,
+        o.customer_email,
+        o.customer_phone,
+        o.shipping_address,
+        o.subtotal,
+        o.shipping_fee,
+        o.total_amount,
+        o.coupon_id,
+        o.coupon_code,
+        o.discount_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'productId', oi.product_id,
+              'name', oi.product_name,
+              'quantity', oi.quantity,
+              'unitPrice', oi.unit_price,
+              'lineTotal', oi.line_total
+            )
+            ORDER BY oi.id
+          ) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
        FROM orders o
        LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE o.user_id = $1
@@ -406,6 +549,7 @@ export async function getAllOrders(req, res) {
     if (search) {
       values.push(`%${search}%`)
       const index = values.length
+
       conditions.push(
         `(o.order_number ILIKE $${index}
           OR o.customer_name ILIKE $${index}
@@ -434,19 +578,21 @@ export async function getAllOrders(req, res) {
 
     const ordersResult = await pool.query(
       `SELECT
-         o.id,
-         o.order_number,
-         o.customer_name,
-         o.customer_email,
-         o.customer_phone,
-         o.subtotal,
-         o.shipping_fee,
-         o.total_amount,
-         o.payment_method,
-         o.payment_status,
-         o.order_status,
-         o.created_at,
-         COUNT(oi.id)::int AS item_count
+        o.id,
+        o.order_number,
+        o.customer_name,
+        o.customer_email,
+        o.customer_phone,
+        o.subtotal,
+        o.shipping_fee,
+        o.total_amount,
+        o.coupon_code,
+        o.discount_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status,
+        o.created_at,
+        COUNT(oi.id)::int AS item_count
        FROM orders o
        LEFT JOIN order_items oi ON oi.order_id = o.id
        ${whereClause}
@@ -493,33 +639,36 @@ export async function getOrderDetails(req, res) {
   try {
     const result = await pool.query(
       `SELECT
-         o.id,
-         o.order_number,
-         o.user_id,
-         o.customer_name,
-         o.customer_email,
-         o.customer_phone,
-         o.shipping_address,
-         o.subtotal,
-         o.shipping_fee,
-         o.total_amount,
-         o.payment_method,
-         o.payment_status,
-         o.order_status,
-         o.created_at,
-         o.updated_at,
-         COALESCE(
-           json_agg(
-             json_build_object(
-               'productId', oi.product_id,
-               'name', oi.product_name,
-               'quantity', oi.quantity,
-               'unitPrice', oi.unit_price,
-               'lineTotal', oi.line_total
-             ) ORDER BY oi.id
-           ) FILTER (WHERE oi.id IS NOT NULL),
-           '[]'::json
-         ) AS items
+        o.id,
+        o.order_number,
+        o.user_id,
+        o.customer_name,
+        o.customer_email,
+        o.customer_phone,
+        o.shipping_address,
+        o.subtotal,
+        o.shipping_fee,
+        o.total_amount,
+        o.coupon_id,
+        o.coupon_code,
+        o.discount_amount,
+        o.payment_method,
+        o.payment_status,
+        o.order_status,
+        o.created_at,
+        o.updated_at,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'productId', oi.product_id,
+              'name', oi.product_name,
+              'quantity', oi.quantity,
+              'unitPrice', oi.unit_price,
+              'lineTotal', oi.line_total
+            ) ORDER BY oi.id
+          ) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
        FROM orders o
        LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE o.id = $1
@@ -662,5 +811,62 @@ export async function updateOrderStatus(req, res) {
     })
   } finally {
     client?.release()
+  }
+}
+
+// Admin: Update payment status independently of delivery status
+export async function updatePaymentStatus(req, res) {
+  const { id } = req.params
+  const { paymentStatus } = req.body ?? {}
+
+  if (!/^[1-9]\d*$/.test(id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid order ID.',
+    })
+  }
+
+  if (!allowedPaymentStatuses.includes(paymentStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid payment status. Use pending, paid, or failed.',
+    })
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE orders
+       SET payment_status = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING
+         id,
+         order_number,
+         payment_method,
+         payment_status,
+         order_status,
+         updated_at`,
+      [paymentStatus, id]
+    )
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found.',
+      })
+    }
+
+    return res.json({
+      success: true,
+      message: 'Payment status updated successfully.',
+      data: result.rows[0],
+    })
+  } catch (error) {
+    console.error('Update payment status error:', error.message)
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to update payment status.',
+    })
   }
 }

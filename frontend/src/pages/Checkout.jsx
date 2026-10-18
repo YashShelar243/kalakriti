@@ -1,21 +1,19 @@
 
-import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
+  LoaderCircle,
   MapPin,
   PackageCheck,
-  ShoppingBag,
   ShieldCheck,
-  LoaderCircle,
-  CheckCircle2,
-  AlertCircle,
-  Plus,
-  MapPinned,
+  ShoppingBag,
+  Tag,
+  TicketPercent,
+  X,
 } from 'lucide-react'
-
-import Button from '../components/Button'
 import { useCart } from '../context/CartContext'
 import api from '../services/api'
 
@@ -27,6 +25,7 @@ function formatPrice(price) {
 }
 
 function Checkout() {
+  const navigate = useNavigate()
   const { cartItems, cartCount, subtotal, clearCart } = useCart()
 
   const [formData, setFormData] = useState({
@@ -40,137 +39,138 @@ function Checkout() {
     paymentMethod: 'cod',
   })
 
-  const [savedAddresses, setSavedAddresses] = useState([])
-  const [selectedAddressId, setSelectedAddressId] = useState('')
-  const [addressesLoading, setAddressesLoading] = useState(true)
-  const [addressLoadError, setAddressLoadError] = useState('')
-
   const [errors, setErrors] = useState({})
   const [formMessage, setFormMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [completedOrder, setCompletedOrder] = useState(null)
 
-  const shippingCharge = subtotal >= 999 ? 0 : 60
-  const total = subtotal + shippingCharge
+  // Promo code state
+  const [couponInput, setCouponInput] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState(null)
+  const [couponLoading, setCouponLoading] = useState(false)
+  const [couponMessage, setCouponMessage] = useState('')
+  const [couponError, setCouponError] = useState('')
 
-  const loadSavedAddresses = useCallback(async () => {
-    try {
-      setAddressesLoading(true)
-      setAddressLoadError('')
+  const shippingCharge = Number(subtotal) >= 999 ? 0 : 60
+  const discountAmount = appliedCoupon
+    ? Number(appliedCoupon.discount_amount || 0)
+    : 0
 
-      const response = await api.get('/addresses')
-      const addresses = response.data?.data || []
-
-      setSavedAddresses(addresses)
-
-      const defaultAddress = addresses.find(
-        (address) => address.is_default
-      )
-
-      if (defaultAddress) {
-        applyAddress(defaultAddress)
-      }
-    } catch (error) {
-      setAddressLoadError(
-        error.response?.data?.message ||
-          'Unable to load saved addresses. You can enter your address manually.'
-      )
-    } finally {
-      setAddressesLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadSavedAddresses()
-  }, [loadSavedAddresses])
-
-  function applyAddress(address) {
-    setSelectedAddressId(String(address.id))
-
-    setFormData((current) => ({
-      ...current,
-      name: address.full_name || '',
-      phone: address.phone || '',
-      address: [
-        address.address_line1,
-        address.address_line2,
-      ]
-        .filter(Boolean)
-        .join(', '),
-      city: address.city || '',
-      state: address.state || '',
-      pincode: address.postal_code || '',
-    }))
-
-    setErrors({})
-    setFormMessage('')
-  }
-
-  function handleSavedAddressChange(event) {
-    const value = event.target.value
-
-    setFormMessage('')
-    setErrors({})
-
-    if (!value) {
-      setSelectedAddressId('')
-
-      setFormData((current) => ({
-        ...current,
-        name: '',
-        phone: '',
-        address: '',
-        city: '',
-        state: 'Maharashtra',
-        pincode: '',
-      }))
-
-      return
-    }
-
-    const address = savedAddresses.find(
-      (item) => String(item.id) === value
-    )
-
-    if (address) {
-      applyAddress(address)
-    }
-  }
+  const total = Math.max(
+    0,
+    Number(subtotal) - discountAmount + shippingCharge
+  )
 
   function handleChange(event) {
     const { name, value } = event.target
 
-    setFormData((current) => ({
-      ...current,
+    setFormData((previous) => ({
+      ...previous,
       [name]: value,
     }))
 
-    setErrors((current) => ({
-      ...current,
+    setErrors((previous) => ({
+      ...previous,
       [name]: '',
     }))
 
     setFormMessage('')
   }
 
+  function handleCouponInputChange(event) {
+    setCouponInput(event.target.value.toUpperCase())
+    setCouponMessage('')
+    setCouponError('')
+  }
+
+  async function handleApplyCoupon(event) {
+    event.preventDefault()
+
+    const code = couponInput.trim().toUpperCase()
+
+    if (!code) {
+      setCouponError('Please enter a promo code.')
+      setCouponMessage('')
+      return
+    }
+
+    if (!Number(subtotal) || Number(subtotal) <= 0) {
+      setCouponError('Add products to your cart before applying a code.')
+      setCouponMessage('')
+      return
+    }
+
+    setCouponLoading(true)
+    setCouponError('')
+    setCouponMessage('')
+
+    try {
+      const response = await api.post('/coupons/validate', {
+        code,
+        subtotal: Number(subtotal),
+      })
+
+      const result = response.data
+
+      if (!result?.success || !result?.data) {
+        throw new Error(
+          result?.message || 'Unable to apply this promo code.'
+        )
+      }
+
+      const coupon = result.data
+      const discount = Number(coupon.discount_amount)
+
+      if (!Number.isFinite(discount) || discount <= 0) {
+        throw new Error('This promo code does not provide a valid discount.')
+      }
+
+      setAppliedCoupon({
+        ...coupon,
+        code: coupon.code || code,
+        discount_amount: discount,
+      })
+
+      setCouponInput(coupon.code || code)
+      setCouponMessage(
+        `${coupon.code || code} applied successfully! You saved ${formatPrice(discount)}.`
+      )
+      setCouponError('')
+    } catch (error) {
+      setAppliedCoupon(null)
+      setCouponMessage('')
+      setCouponError(
+        error.response?.data?.message ||
+          error.message ||
+          'Unable to validate the promo code. Please try again.'
+      )
+    } finally {
+      setCouponLoading(false)
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null)
+    setCouponInput('')
+    setCouponMessage('')
+    setCouponError('')
+  }
+
   function validateForm() {
     const nextErrors = {}
 
-    if (!formData.name.trim()) {
-      nextErrors.name = 'Please enter your full name.'
-    } else if (
+    if (
+      typeof formData.name !== 'string' ||
       formData.name.trim().length < 2 ||
       formData.name.trim().length > 120
     ) {
-      nextErrors.name = 'Name must contain 2–120 characters.'
+      nextErrors.name = 'Enter a name between 2 and 120 characters.'
     }
 
-    if (!formData.email.trim()) {
-      nextErrors.email = 'Please enter your email address.'
-    } else if (
+    if (
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())
     ) {
-      nextErrors.email = 'Please enter a valid email address.'
+      nextErrors.email = 'Enter a valid email address.'
     }
 
     if (!/^[6-9]\d{9}$/.test(formData.phone.trim())) {
@@ -178,15 +178,15 @@ function Checkout() {
     }
 
     if (!formData.address.trim()) {
-      nextErrors.address = 'Please enter your delivery address.'
+      nextErrors.address = 'Enter your complete delivery address.'
     }
 
     if (!formData.city.trim()) {
-      nextErrors.city = 'Please enter your city.'
+      nextErrors.city = 'Enter your city.'
     }
 
     if (!formData.state.trim()) {
-      nextErrors.state = 'Please enter your state.'
+      nextErrors.state = 'Enter your state.'
     }
 
     if (!/^\d{6}$/.test(formData.pincode.trim())) {
@@ -199,24 +199,19 @@ function Checkout() {
 
   async function handleSubmit(event) {
     event.preventDefault()
-
-    if (isSubmitting) return
-
-    if (cartItems.length === 0) {
-      setFormMessage(
-        'Your shopping bag is empty. Add a product before checkout.'
-      )
-      return
-    }
+    setFormMessage('')
 
     if (!validateForm()) {
       setFormMessage('Please correct the highlighted fields.')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+
+    if (!cartItems.length) {
+      setFormMessage('Your cart is empty.')
       return
     }
 
     setIsSubmitting(true)
-    setFormMessage('')
 
     try {
       const orderPayload = {
@@ -236,6 +231,9 @@ function Checkout() {
           productId: item.id,
           quantity: item.quantity,
         })),
+        ...(appliedCoupon?.code
+          ? { couponCode: appliedCoupon.code }
+          : {}),
       }
 
       const response = await api.post('/orders', orderPayload)
@@ -249,532 +247,597 @@ function Checkout() {
 
       setCompletedOrder(result.data)
       clearCart()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      })
     } catch (error) {
       const status = error.response?.status
-      const message =
-        error.response?.data?.message ||
-        error.message ||
-        'Unable to place your order. Please try again.'
 
       if (status === 409) {
         setFormMessage(
-          `${message} Please return to your bag and review the quantities.`
+          error.response?.data?.message ||
+            'Some products no longer have enough stock. Please review your cart.'
         )
       } else if (!error.response) {
         setFormMessage(
-          'Could not connect to the server. Check that the backend is running and try again.'
+          'Unable to connect to the server. Please check that the backend is running.'
         )
       } else {
-        setFormMessage(message)
+        setFormMessage(
+          error.response?.data?.message ||
+            error.message ||
+            'Unable to place your order. Please try again.'
+        )
       }
-
-      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setIsSubmitting(false)
     }
   }
 
   const inputClass =
-    'mt-2 w-full rounded-xl border border-gold/30 bg-white px-4 py-3 text-sm text-burgundy outline-none transition placeholder:text-burgundy/40 focus:border-maroon focus:ring-1 focus:ring-maroon'
+    'mt-2 w-full rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition placeholder:text-stone-400 focus:border-[#762C36] focus:ring-2 focus:ring-[#762C36]/10'
 
-  const labelClass = 'text-sm font-medium text-burgundy'
+  const labelClass = 'text-sm font-medium text-stone-700'
 
-  function fieldError(name) {
-    return errors[name] ? (
-      <p className="mt-1 text-xs text-red-600">
-        {errors[name]}
-      </p>
-    ) : null
-  }
-
-  // Successful order confirmation
   if (completedOrder) {
+    const order = completedOrder
+    const savedAmount = Number(order.discount_amount || 0)
+
     return (
-      <section className="mx-auto flex min-h-[65vh] max-w-2xl flex-col items-center justify-center px-4 py-16 text-center">
-        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-50">
-          <CheckCircle2 size={44} className="text-green-600" />
+      <main className="min-h-screen bg-[#F8F1E7] px-4 py-12 sm:px-6">
+        <div className="mx-auto max-w-2xl rounded-3xl bg-white p-6 text-center shadow-sm sm:p-10">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-50 text-green-600">
+            <CheckCircle2 size={44} />
+          </div>
+
+          <p className="mt-6 text-sm font-semibold uppercase tracking-[0.2em] text-[#C5A15B]">
+            KalaKriti
+          </p>
+
+          <h1 className="mt-3 text-3xl font-semibold text-[#54232A]">
+            Order placed successfully!
+          </h1>
+
+          <p className="mt-3 text-stone-600">
+            Thank you for supporting handmade creations. Your order has
+            been received.
+          </p>
+
+          <div className="mt-8 rounded-2xl border border-stone-200 p-5 text-left">
+            <div className="flex items-center gap-3">
+              <PackageCheck className="text-[#762C36]" size={24} />
+              <div>
+                <p className="text-sm text-stone-500">Order number</p>
+                <p className="font-semibold text-stone-900">
+                  {order.order_number}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 border-t border-stone-200 pt-4 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-stone-600">Subtotal</span>
+                <span>{formatPrice(order.subtotal)}</span>
+              </div>
+
+              {savedAmount > 0 && (
+                <div className="flex justify-between gap-4 text-green-700">
+                  <span>
+                    Promo discount
+                    {order.coupon_code ? ` (${order.coupon_code})` : ''}
+                  </span>
+                  <span>-{formatPrice(savedAmount)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between gap-4">
+                <span className="text-stone-600">Shipping</span>
+                <span>
+                  {Number(order.shipping_fee) === 0
+                    ? 'FREE'
+                    : formatPrice(order.shipping_fee)}
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-4 border-t border-stone-200 pt-3 text-base font-semibold text-[#54232A]">
+                <span>Order total</span>
+                <span>{formatPrice(order.total_amount)}</span>
+              </div>
+
+              <p className="pt-2 text-stone-600">
+                Payment method: Cash on Delivery
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => navigate('/my-orders')}
+              className="rounded-xl bg-[#762C36] px-6 py-3 font-medium text-white transition hover:bg-[#54232A]"
+            >
+              View my orders
+            </button>
+
+            <Link
+              to="/shop"
+              className="rounded-xl border border-stone-300 px-6 py-3 font-medium text-stone-700 transition hover:bg-stone-50"
+            >
+              Continue shopping
+            </Link>
+          </div>
         </div>
-
-        <p className="mt-6 text-xs uppercase tracking-[0.2em] text-gold">
-          Thank you for supporting handmade
-        </p>
-
-        <h1 className="mt-3 font-display text-3xl text-burgundy sm:text-4xl">
-          Order Placed Successfully!
-        </h1>
-
-        <p className="mt-4 text-sm leading-6 text-burgundy/70">
-          Thank you for shopping with KalaKriti. Your order has been saved.
-        </p>
-
-        <div className="mt-7 w-full rounded-2xl border border-gold/30 bg-ivory/50 p-5 text-left">
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-sm text-burgundy/70">
-              Order number
-            </span>
-            <span className="break-all text-right font-semibold text-maroon">
-              {completedOrder.order_number}
-            </span>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between gap-4 border-t border-gold/20 pt-4">
-            <span className="text-sm text-burgundy/70">
-              Order total
-            </span>
-            <span className="text-lg font-semibold text-maroon">
-              {formatPrice(completedOrder.total_amount)}
-            </span>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between gap-4 border-t border-gold/20 pt-4">
-            <span className="text-sm text-burgundy/70">
-              Payment
-            </span>
-            <span className="text-sm font-medium text-burgundy">
-              Cash on Delivery
-            </span>
-          </div>
-        </div>
-
-        <p className="mt-4 text-xs leading-5 text-burgundy/60">
-          Save your order number for future reference.
-        </p>
-
-        <Link to="/shop" className="mt-7">
-          <Button>Continue Shopping</Button>
-        </Link>
-      </section>
+      </main>
     )
   }
 
-  if (cartItems.length === 0) {
+  if (!cartItems.length) {
     return (
-      <section className="mx-auto flex min-h-[55vh] max-w-3xl flex-col items-center justify-center px-4 py-16 text-center">
-        <ShoppingBag size={46} className="text-gold" />
+      <main className="min-h-screen bg-[#F8F1E7] px-4 py-16">
+        <div className="mx-auto max-w-xl rounded-3xl bg-white p-8 text-center shadow-sm">
+          <ShoppingBag className="mx-auto text-[#762C36]" size={48} />
 
-        <h1 className="mt-5 font-display text-3xl text-burgundy">
-          Your bag is empty
-        </h1>
+          <h1 className="mt-5 text-2xl font-semibold text-[#54232A]">
+            Your cart is empty
+          </h1>
 
-        <p className="mt-3 text-sm text-burgundy/70">
-          Add some handmade creations before proceeding to checkout.
-        </p>
+          <p className="mt-3 text-stone-600">
+            Add some beautiful handmade products before checking out.
+          </p>
 
-        <Link to="/shop" className="mt-6">
-          <Button>Explore Creations</Button>
-        </Link>
-      </section>
+          <Link
+            to="/shop"
+            className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#762C36] px-6 py-3 font-medium text-white hover:bg-[#54232A]"
+          >
+            Explore the shop <ArrowRight size={18} />
+          </Link>
+        </div>
+      </main>
     )
   }
 
   return (
-    <section className="min-h-screen bg-warm-white px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+    <main className="min-h-screen bg-[#F8F1E7] px-4 py-8 sm:px-6 lg:py-12">
       <div className="mx-auto max-w-7xl">
         <Link
           to="/cart"
-          className="mb-6 inline-flex items-center gap-2 text-sm text-maroon transition hover:text-gold"
+          className="inline-flex items-center gap-2 text-sm font-medium text-[#762C36] hover:text-[#54232A]"
         >
-          <ArrowLeft size={16} />
-          Return to shopping bag
+          <ArrowLeft size={17} />
+          Back to cart
         </Link>
 
-        <div className="mb-8 border-b border-gold/20 pb-6">
-          <p className="text-xs uppercase tracking-[0.2em] text-gold">
-            Almost yours
+        <div className="mt-6">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#C5A15B]">
+            KalaKriti
           </p>
 
-          <h1 className="mt-2 font-display text-3xl text-burgundy sm:text-4xl">
-            Checkout
+          <h1 className="mt-2 text-3xl font-semibold text-[#54232A] sm:text-4xl">
+            Secure checkout
           </h1>
 
-          <p className="mt-2 text-sm text-burgundy/70">
-            Enter your details to place your KalaKriti order.
+          <p className="mt-3 text-stone-600">
+            You are just a few steps away from receiving something handmade
+            with love.
           </p>
         </div>
 
         {formMessage && (
           <div
             role="alert"
-            className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+            className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
           >
             {formMessage}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate>
-          <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-3">
+        <form
+          onSubmit={handleSubmit}
+          noValidate
+          className="mt-8 grid grid-cols-1 items-start gap-8 lg:grid-cols-[1fr_390px]"
+        >
+          <div className="space-y-6">
             {/* Delivery information */}
-            <div className="space-y-6 lg:col-span-2">
-              <div className="rounded-2xl border border-gold/20 bg-white p-5 sm:p-7">
-                <div className="mb-6 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-ivory">
-                    <MapPin size={20} className="text-maroon" />
-                  </div>
-
-                  <div>
-                    <h2 className="font-display text-xl text-burgundy">
-                      Delivery Details
-                    </h2>
-                    <p className="mt-1 text-xs text-burgundy/60">
-                      Where should we deliver your order?
-                    </p>
-                  </div>
+            <section className="rounded-3xl bg-white p-5 shadow-sm sm:p-7">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#F8F1E7] text-[#762C36]">
+                  <MapPin size={22} />
                 </div>
 
-                {/* Saved address selector */}
-                <div className="mb-6 rounded-xl border border-gold/25 bg-ivory/30 p-4">
-                  <div className="flex items-center gap-2">
-                    <MapPinned size={18} className="text-maroon" />
-                    <label
-                      htmlFor="saved-address"
-                      className="text-sm font-semibold text-burgundy"
-                    >
-                      Use a Saved Address
-                    </label>
-                  </div>
-
-                  {addressesLoading ? (
-                    <div className="mt-3 flex items-center gap-2 text-sm text-burgundy/70">
-                      <LoaderCircle
-                        size={16}
-                        className="animate-spin"
-                      />
-                      Loading saved addresses...
-                    </div>
-                  ) : (
-                    <select
-                      id="saved-address"
-                      value={selectedAddressId}
-                      onChange={handleSavedAddressChange}
-                      className={inputClass}
-                    >
-                      <option value="">
-                        Enter a new address manually
-                      </option>
-
-                      {savedAddresses.map((address) => (
-                        <option
-                          key={address.id}
-                          value={String(address.id)}
-                        >
-                          {address.address_type} — {address.full_name},{' '}
-                          {address.city}
-                          {address.is_default ? ' (Default)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {addressLoadError && (
-                    <p className="mt-2 text-xs text-amber-700">
-                      {addressLoadError}
-                    </p>
-                  )}
-
-                  {!addressesLoading &&
-                    savedAddresses.length === 0 &&
-                    !addressLoadError && (
-                      <p className="mt-2 text-xs text-burgundy/65">
-                        No saved addresses yet. Enter your details below
-                        or add an address in My Profile.
-                      </p>
-                    )}
-
-                  {selectedAddressId && (
-                    <p className="mt-2 text-xs text-burgundy/65">
-                      Saved address selected. You can change the details
-                      below for this order without changing your saved address.
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
-                    <label className={labelClass} htmlFor="name">
-                      Full Name *
-                    </label>
-                    <input
-                      id="name"
-                      name="name"
-                      value={formData.name}
-                      onChange={handleChange}
-                      autoComplete="name"
-                      maxLength={120}
-                      placeholder="Enter your full name"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.name)}
-                      required
-                    />
-                    {fieldError('name')}
-                  </div>
-
-                  <div>
-                    <label className={labelClass} htmlFor="email">
-                      Email Address *
-                    </label>
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={handleChange}
-                      autoComplete="email"
-                      placeholder="you@example.com"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.email)}
-                      required
-                    />
-                    {fieldError('email')}
-                  </div>
-
-                  <div>
-                    <label className={labelClass} htmlFor="phone">
-                      Mobile Number *
-                    </label>
-                    <input
-                      id="phone"
-                      name="phone"
-                      type="tel"
-                      inputMode="numeric"
-                      maxLength={10}
-                      value={formData.phone}
-                      onChange={handleChange}
-                      autoComplete="tel-national"
-                      placeholder="10-digit mobile number"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.phone)}
-                      required
-                    />
-                    {fieldError('phone')}
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label className={labelClass} htmlFor="address">
-                      Complete Address *
-                    </label>
-                    <textarea
-                      id="address"
-                      name="address"
-                      rows={3}
-                      value={formData.address}
-                      onChange={handleChange}
-                      autoComplete="street-address"
-                      placeholder="House number, street, area, landmark"
-                      className={`${inputClass} resize-y`}
-                      aria-invalid={Boolean(errors.address)}
-                      required
-                    />
-                    {fieldError('address')}
-                  </div>
-
-                  <div>
-                    <label className={labelClass} htmlFor="city">
-                      City *
-                    </label>
-                    <input
-                      id="city"
-                      name="city"
-                      value={formData.city}
-                      onChange={handleChange}
-                      autoComplete="address-level2"
-                      placeholder="Your city"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.city)}
-                      required
-                    />
-                    {fieldError('city')}
-                  </div>
-
-                  <div>
-                    <label className={labelClass} htmlFor="state">
-                      State *
-                    </label>
-                    <input
-                      id="state"
-                      name="state"
-                      value={formData.state}
-                      onChange={handleChange}
-                      autoComplete="address-level1"
-                      placeholder="Your state"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.state)}
-                      required
-                    />
-                    {fieldError('state')}
-                  </div>
-
-                  <div>
-                    <label className={labelClass} htmlFor="pincode">
-                      PIN Code *
-                    </label>
-                    <input
-                      id="pincode"
-                      name="pincode"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={formData.pincode}
-                      onChange={handleChange}
-                      autoComplete="postal-code"
-                      placeholder="6-digit PIN code"
-                      className={inputClass}
-                      aria-invalid={Boolean(errors.pincode)}
-                      required
-                    />
-                    {fieldError('pincode')}
-                  </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-[#54232A]">
+                    Delivery details
+                  </h2>
+                  <p className="mt-1 text-sm text-stone-500">
+                    Where should we deliver your order?
+                  </p>
                 </div>
               </div>
 
-              {/* Payment method */}
-              <div className="rounded-2xl border border-gold/20 bg-white p-5 sm:p-7">
-                <h2 className="font-display text-xl text-burgundy">
-                  Payment Method
-                </h2>
-
-                <p className="mt-1 text-xs text-burgundy/60">
-                  Choose how you would like to pay.
-                </p>
-
-                <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-maroon/40 bg-ivory/50 p-4">
+              <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className={labelClass} htmlFor="name">
+                    Full name *
+                  </label>
                   <input
-                    type="radio"
-                    name="paymentMethod"
-                    value="cod"
-                    checked={formData.paymentMethod === 'cod'}
+                    id="name"
+                    name="name"
+                    autoComplete="name"
+                    value={formData.name}
                     onChange={handleChange}
-                    className="mt-1 accent-[#762C36]"
+                    className={inputClass}
+                    placeholder="Enter your full name"
+                    maxLength={120}
+                    aria-invalid={Boolean(errors.name)}
                   />
+                  {errors.name && (
+                    <p className="mt-1 text-xs text-red-600">{errors.name}</p>
+                  )}
+                </div>
 
-                  <div>
-                    <p className="text-sm font-semibold text-burgundy">
-                      Cash on Delivery
+                <div>
+                  <label className={labelClass} htmlFor="email">
+                    Email address *
+                  </label>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="you@example.com"
+                    aria-invalid={Boolean(errors.email)}
+                  />
+                  {errors.email && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {errors.email}
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-burgundy/70">
-                      Pay when your order is delivered.
+                  )}
+                </div>
+
+                <div>
+                  <label className={labelClass} htmlFor="phone">
+                    Mobile number *
+                  </label>
+                  <input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    autoComplete="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={formData.phone}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="10-digit mobile number"
+                    aria-invalid={Boolean(errors.phone)}
+                  />
+                  {errors.phone && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {errors.phone}
                     </p>
-                  </div>
-                </label>
+                  )}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className={labelClass} htmlFor="address">
+                    Complete address *
+                  </label>
+                  <textarea
+                    id="address"
+                    name="address"
+                    autoComplete="street-address"
+                    rows={3}
+                    maxLength={1000}
+                    value={formData.address}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="House number, street, area, landmark"
+                    aria-invalid={Boolean(errors.address)}
+                  />
+                  {errors.address && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {errors.address}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className={labelClass} htmlFor="city">
+                    City *
+                  </label>
+                  <input
+                    id="city"
+                    name="city"
+                    autoComplete="address-level2"
+                    value={formData.city}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="Your city"
+                    aria-invalid={Boolean(errors.city)}
+                  />
+                  {errors.city && (
+                    <p className="mt-1 text-xs text-red-600">{errors.city}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className={labelClass} htmlFor="state">
+                    State *
+                  </label>
+                  <input
+                    id="state"
+                    name="state"
+                    autoComplete="address-level1"
+                    value={formData.state}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="Your state"
+                    aria-invalid={Boolean(errors.state)}
+                  />
+                  {errors.state && (
+                    <p className="mt-1 text-xs text-red-600">{errors.state}</p>
+                  )}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className={labelClass} htmlFor="pincode">
+                    PIN code *
+                  </label>
+                  <input
+                    id="pincode"
+                    name="pincode"
+                    autoComplete="postal-code"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={formData.pincode}
+                    onChange={handleChange}
+                    className={inputClass}
+                    placeholder="6-digit PIN code"
+                    aria-invalid={Boolean(errors.pincode)}
+                  />
+                  {errors.pincode && (
+                    <p className="mt-1 text-xs text-red-600">
+                      {errors.pincode}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            </section>
 
-            {/* Order summary */}
-            <aside className="rounded-2xl border border-gold/20 bg-ivory/60 p-5 sm:p-6 lg:sticky lg:top-28">
-              <h2 className="font-display text-2xl text-burgundy">
-                Order Summary
+            {/* Payment method */}
+            <section className="rounded-3xl bg-white p-5 shadow-sm sm:p-7">
+              <h2 className="text-xl font-semibold text-[#54232A]">
+                Payment method
               </h2>
 
-              <div className="mt-5 max-h-80 space-y-4 overflow-y-auto">
+              <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#762C36] bg-[#F8F1E7]/60 p-4">
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value="cod"
+                  checked={formData.paymentMethod === 'cod'}
+                  onChange={handleChange}
+                  className="mt-1 accent-[#762C36]"
+                />
+
+                <div>
+                  <p className="font-semibold text-stone-800">
+                    Cash on Delivery
+                  </p>
+                  <p className="mt-1 text-sm text-stone-600">
+                    Pay when your order arrives at your doorstep.
+                  </p>
+                </div>
+              </label>
+            </section>
+          </div>
+
+          {/* Order summary */}
+          <aside className="space-y-6 lg:sticky lg:top-6">
+            <section className="rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-[#54232A]">
+                  Order summary
+                </h2>
+
+                <span className="rounded-full bg-[#F8F1E7] px-3 py-1 text-xs font-semibold text-[#762C36]">
+                  {cartCount} {cartCount === 1 ? 'item' : 'items'}
+                </span>
+              </div>
+
+              <div className="mt-5 max-h-72 space-y-4 overflow-y-auto">
                 {cartItems.map((item) => (
-                  <div key={item.id} className="flex gap-3">
-                    <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-white">
-                      {(item.image_url || item.image) && (
-                        <img
-                          src={item.image_url || item.image}
-                          alt={item.name}
-                          className="h-full w-full object-cover"
-                        />
-                      )}
-
-                      <span className="absolute right-0 top-0 flex h-5 min-w-5 items-center justify-center rounded-full bg-maroon px-1 text-[10px] text-white">
-                        {item.quantity}
-                      </span>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-burgundy">
+                  <div
+                    key={item.id}
+                    className="flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium text-stone-800">
                         {item.name}
                       </p>
-                      <p className="mt-1 text-xs text-burgundy/60">
+
+                      <p className="mt-1 text-xs text-stone-500">
                         Qty: {item.quantity}
                       </p>
                     </div>
 
-                    <p className="shrink-0 text-sm font-medium text-maroon">
+                    <p className="shrink-0 text-sm font-medium text-stone-800">
                       {formatPrice(
-                        Number(item.price) * item.quantity
+                        Number(item.price) * Number(item.quantity)
                       )}
                     </p>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-5 space-y-3 border-t border-gold/30 pt-5">
-                <div className="flex justify-between gap-3 text-sm text-burgundy/80">
-                  <span>Items ({cartCount})</span>
-                  <span>{formatPrice(subtotal)}</span>
+              {/* Promo code */}
+              <div className="mt-6 border-t border-stone-200 pt-5">
+                <div className="flex items-center gap-2">
+                  <TicketPercent size={20} className="text-[#762C36]" />
+                  <h3 className="font-semibold text-[#54232A]">
+                    Promo code
+                  </h3>
                 </div>
 
-                <div className="flex justify-between gap-3 text-sm text-burgundy/80">
-                  <span>Shipping</span>
-                  <span>
-                    {shippingCharge === 0
-                      ? 'Free'
-                      : formatPrice(shippingCharge)}
-                  </span>
-                </div>
+                {appliedCoupon ? (
+                  <div className="mt-3 rounded-2xl border border-green-200 bg-green-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Tag size={18} className="shrink-0 text-green-700" />
+                        <div className="min-w-0">
+                          <p className="break-all font-semibold text-green-800">
+                            {appliedCoupon.code}
+                          </p>
+                          <p className="mt-1 text-xs text-green-700">
+                            You saved {formatPrice(discountAmount)}
+                          </p>
+                        </div>
+                      </div>
 
-                {shippingCharge > 0 && (
-                  <p className="text-xs leading-5 text-burgundy/60">
-                    Free shipping on orders of ₹999 or more.
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-2 text-sm font-medium text-red-600 hover:bg-red-100"
+                        aria-label="Remove promo code"
+                      >
+                        <X size={16} />
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={couponInput}
+                        onChange={handleCouponInputChange}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            handleApplyCoupon(event)
+                          }
+                        }}
+                        maxLength={50}
+                        placeholder="Enter promo code"
+                        aria-label="Promo code"
+                        className="min-w-0 flex-1 rounded-xl border border-stone-300 px-3 py-3 text-sm uppercase outline-none focus:border-[#762C36] focus:ring-2 focus:ring-[#762C36]/10"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleApplyCoupon}
+                        disabled={couponLoading || !couponInput.trim()}
+                        className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#762C36] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#54232A] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {couponLoading ? (
+                          <LoaderCircle size={17} className="animate-spin" />
+                        ) : (
+                          'Apply'
+                        )}
+                      </button>
+                    </div>
+
+                    {couponError && (
+                      <p role="alert" className="mt-2 text-sm text-red-600">
+                        {couponError}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {couponMessage && (
+                  <p className="mt-3 text-sm text-green-700">
+                    {couponMessage}
                   </p>
                 )}
               </div>
 
-              <div className="mt-5 flex items-center justify-between gap-3 border-t border-gold/30 pt-5">
-                <span className="font-semibold text-burgundy">
-                  Total
-                </span>
-                <span className="text-xl font-semibold text-maroon">
-                  {formatPrice(total)}
-                </span>
+              {/* Price breakdown */}
+              <div className="mt-6 space-y-3 border-t border-stone-200 pt-5 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-stone-600">Subtotal</span>
+                  <span className="font-medium text-stone-800">
+                    {formatPrice(subtotal)}
+                  </span>
+                </div>
+
+                <div className="flex justify-between gap-3">
+                  <span className="text-stone-600">Shipping</span>
+                  <span
+                    className={
+                      shippingCharge === 0
+                        ? 'font-medium text-green-700'
+                        : 'font-medium text-stone-800'
+                    }
+                  >
+                    {shippingCharge === 0
+                      ? 'FREE'
+                      : formatPrice(shippingCharge)}
+                  </span>
+                </div>
+
+                {discountAmount > 0 && (
+                  <div className="flex justify-between gap-3 text-green-700">
+                    <span className="flex items-center gap-1">
+                      <Tag size={15} />
+                      Discount
+                    </span>
+                    <span className="font-medium">
+                      -{formatPrice(discountAmount)}
+                    </span>
+                  </div>
+                )}
+
+                {shippingCharge > 0 && (
+                  <p className="rounded-xl bg-[#F8F1E7] p-3 text-xs leading-relaxed text-stone-600">
+                    Add products to reach ₹999 for free shipping.
+                  </p>
+                )}
+
+                <div className="flex justify-between gap-3 border-t border-stone-200 pt-4 text-base font-semibold">
+                  <span className="text-[#54232A]">Total</span>
+                  <span className="text-[#54232A]">
+                    {formatPrice(total)}
+                  </span>
+                </div>
               </div>
 
-              <div className="mt-5 flex items-start gap-3 rounded-xl bg-white p-3">
-                <ShieldCheck
-                  size={20}
-                  className="mt-0.5 shrink-0 text-gold"
-                />
-                <p className="text-xs leading-5 text-burgundy/70">
-                  Your order details are submitted securely to the
-                  KalaKriti backend.
+              <button
+                type="submit"
+                disabled={isSubmitting || !cartItems.length}
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#762C36] px-5 py-4 font-semibold text-white transition hover:bg-[#54232A] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmitting ? (
+                  <>
+                    <LoaderCircle size={19} className="animate-spin" />
+                    Placing order...
+                  </>
+                ) : (
+                  <>
+                    Place order <ArrowRight size={19} />
+                  </>
+                )}
+              </button>
+
+              <div className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-stone-500">
+                <ShieldCheck size={17} className="mt-0.5 shrink-0 text-green-700" />
+                <p>
+                  Your order total is recalculated by our server before the
+                  order is saved. Promo codes are checked again during
+                  checkout.
                 </p>
               </div>
-
-              <div className="mt-6">
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={isSubmitting}
-                >
-                  <span className="inline-flex items-center justify-center gap-2">
-                    {isSubmitting ? (
-                      <>
-                        <LoaderCircle
-                          size={17}
-                          className="animate-spin"
-                        />
-                        Placing Order...
-                      </>
-                    ) : (
-                      <>
-                        Place Order
-                        <ArrowRight size={17} />
-                      </>
-                    )}
-                  </span>
-                </Button>
-              </div>
-
-              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-burgundy/60">
-                <PackageCheck size={15} />
-                Handmade and packed with care
-              </div>
-            </aside>
-          </div>
+            </section>
+          </aside>
         </form>
       </div>
-    </section>
+    </main>
   )
 }
 

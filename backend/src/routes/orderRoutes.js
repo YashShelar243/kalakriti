@@ -7,6 +7,7 @@ import {
   getAllOrders,
   getOrderDetails,
   updateOrderStatus,
+  updatePaymentStatus,
 } from '../controllers/orderController.js'
 
 import {
@@ -51,6 +52,14 @@ router.patch(
   protect,
   authorize('admin'),
   updateOrderStatus
+)
+
+// Admin: Update payment status
+router.patch(
+  '/admin/:id/payment-status',
+  protect,
+  authorize('admin'),
+  updatePaymentStatus
 )
 
 export default router

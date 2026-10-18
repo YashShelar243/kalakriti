@@ -73,7 +73,11 @@ function StatusBadge({ status }) {
 
 function OrderDetailsModal({ order, onClose, onStatusUpdated }) {
   const [selectedStatus, setSelectedStatus] = useState(order.order_status)
+  const [selectedPaymentStatus, setSelectedPaymentStatus] = useState(
+    order.payment_status || 'pending'
+  )
   const [saving, setSaving] = useState(false)
+  const [paymentSaving, setPaymentSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -117,6 +121,45 @@ function OrderDetailsModal({ order, onClose, onStatusUpdated }) {
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function updatePaymentStatus() {
+    if (selectedPaymentStatus === order.payment_status) return
+
+    if (
+      selectedPaymentStatus === 'paid' &&
+      !window.confirm('Confirm that payment has actually been received for this order?')
+    ) {
+      return
+    }
+
+    setPaymentSaving(true)
+    setError('')
+    setSuccess('')
+
+    try {
+      const response = await api.patch(
+        `/orders/admin/${order.id}/payment-status`,
+        { paymentStatus: selectedPaymentStatus }
+      )
+
+      if (!response.data?.success) {
+        throw new Error(
+          response.data?.message || 'Could not update payment status.'
+        )
+      }
+
+      setSuccess('Payment status updated successfully.')
+      onStatusUpdated(response.data.data)
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          err.message ||
+          'Unable to update payment status.'
+      )
+    } finally {
+      setPaymentSaving(false)
     }
   }
 
@@ -287,9 +330,43 @@ function OrderDetailsModal({ order, onClose, onStatusUpdated }) {
                 Method: <strong className="uppercase">{order.payment_method}</strong>
               </span>
               <span className="capitalize text-gray-700">
-                Payment status: <strong>{order.payment_status}</strong>
+                Current payment status: <strong>{order.payment_status || 'pending'}</strong>
               </span>
             </div>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <select
+                value={selectedPaymentStatus}
+                onChange={(event) => {
+                  setSelectedPaymentStatus(event.target.value)
+                  setError('')
+                  setSuccess('')
+                }}
+                disabled={paymentSaving}
+                aria-label="Select payment status"
+                className="min-w-0 flex-1 rounded-xl border border-[#e6d6c5] bg-white px-4 py-3 text-sm capitalize outline-none focus:border-[#762C36] disabled:bg-gray-100"
+              >
+                <option value="pending">Pending</option>
+                <option value="paid">Paid</option>
+                <option value="failed">Failed</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={updatePaymentStatus}
+                disabled={
+                  paymentSaving ||
+                  selectedPaymentStatus === (order.payment_status || 'pending')
+                }
+                className="rounded-xl bg-[#762C36] px-5 py-3 text-sm font-semibold text-white hover:bg-[#54232A] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {paymentSaving ? 'Saving...' : 'Save payment status'}
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-gray-500">
+              For Cash on Delivery, select Paid only after the customer has paid.
+            </p>
           </div>
 
           <div className="rounded-xl border border-[#eee2d5] p-4">
@@ -429,7 +506,7 @@ export default function ManageOrders() {
         current
           ? {
               ...current,
-              order_status: updatedOrder.order_status,
+              order_status: updatedOrder.order_status ?? current.order_status,
               payment_status:
                 updatedOrder.payment_status ?? current.payment_status,
               updated_at: updatedOrder.updated_at ?? current.updated_at,

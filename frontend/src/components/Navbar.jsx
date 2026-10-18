@@ -16,6 +16,7 @@ import {
   Store,
   ClipboardList,
   Tags,
+  TicketPercent,
 } from 'lucide-react'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
@@ -42,7 +43,6 @@ function Navbar() {
   const isCustomer = isAuthenticated && user?.role === 'customer'
   const accountPath = isAdmin ? '/admin/dashboard' : '/account'
 
-  // Load the wishlist count and listen for updates from the Shop page.
   useEffect(() => {
     let cancelled = false
 
@@ -156,6 +156,10 @@ function Navbar() {
       return location.pathname === '/admin/orders'
     }
 
+    if (path === '/admin/coupons') {
+      return location.pathname === '/admin/coupons'
+    }
+
     return false
   }
 
@@ -195,6 +199,11 @@ function Navbar() {
       label: 'Manage Orders',
       href: '/admin/orders',
       icon: ClipboardList,
+    },
+    {
+      label: 'Manage Coupons',
+      href: '/admin/coupons',
+      icon: TicketPercent,
     },
   ]
 
@@ -600,14 +609,16 @@ function Navbar() {
                       My Account
                     </Link>
 
-                    <Link
-                      to="/my-orders"
-                      onClick={closeMenu}
-                      className="flex items-center gap-2 py-3 text-sm text-maroon"
-                    >
-                      <Package size={17} />
-                      My Orders
-                    </Link>
+                    {!isAdmin && (
+                      <Link
+                        to="/my-orders"
+                        onClick={closeMenu}
+                        className="flex items-center gap-2 py-3 text-sm text-maroon"
+                      >
+                        <Package size={17} />
+                        My Orders
+                      </Link>
+                    )}
 
                     <button
                       type="button"

@@ -1,6 +1,9 @@
 
 import { Router } from 'express'
-import { getDashboardStats } from '../controllers/adminController.js'
+import {
+  getDashboardStats,
+  getSalesReport,
+} from '../controllers/adminController.js'
 import { protect, authorize } from '../middleware/authMiddleware.js'
 
 const router = Router()
@@ -10,6 +13,13 @@ router.get(
   protect,
   authorize('admin'),
   getDashboardStats
+)
+
+router.get(
+  '/sales-report',
+  protect,
+  authorize('admin'),
+  getSalesReport
 )
 
 export default router

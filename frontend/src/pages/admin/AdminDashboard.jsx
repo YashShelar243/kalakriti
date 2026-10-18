@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -12,6 +13,7 @@ import {
   Plus,
   Boxes,
   Settings,
+  BarChart3,
 } from 'lucide-react'
 import api from '../../services/api'
 
@@ -147,9 +149,7 @@ export default function AdminDashboard() {
           <h2 className="text-lg font-bold text-red-800">
             Unable to load dashboard
           </h2>
-
           <p className="mt-2 text-sm text-red-700">{error}</p>
-
           <button
             type="button"
             onClick={loadDashboard}
@@ -175,11 +175,9 @@ export default function AdminDashboard() {
             <p className="text-sm font-medium tracking-widest text-[#C5A15B]">
               KALAKRITI ADMIN
             </p>
-
             <h1 className="mt-2 text-3xl font-bold text-[#54232A]">
               Dashboard
             </h1>
-
             <p className="mt-2 text-sm text-gray-500">
               A quick overview of your handmade crafts store.
             </p>
@@ -232,9 +230,8 @@ export default function AdminDashboard() {
             <h2 className="text-xl font-bold text-[#54232A]">
               Store Management
             </h2>
-
             <p className="mt-1 text-sm text-gray-500">
-              Manage your products and customer orders from one place.
+              Manage your products, customer orders and store performance.
             </p>
           </div>
 
@@ -253,6 +250,14 @@ export default function AdminDashboard() {
               to="/admin/orders"
               icon={ShoppingBag}
               action="View orders"
+            />
+
+            <QuickActionCard
+              title="Sales Reports"
+              description="Review sales trends, paid orders, coupon discounts, and best-selling products."
+              to="/admin/sales-reports"
+              icon={BarChart3}
+              action="View reports"
             />
 
             <QuickActionCard
@@ -284,15 +289,12 @@ export default function AdminDashboard() {
               <p className="text-sm font-medium text-amber-800">
                 Low Stock Products
               </p>
-
               <p className="mt-1 text-2xl font-bold text-amber-900">
                 {products.low_stock_products}
               </p>
-
               <p className="mt-1 text-xs text-amber-700">
                 Active products with 5 or fewer items
               </p>
-
               <Link
                 to="/admin/products"
                 className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-amber-900 hover:underline"
@@ -308,7 +310,6 @@ export default function AdminDashboard() {
               <div className="rounded-xl bg-green-50 p-3 text-green-700">
                 <ShoppingBag size={22} />
               </div>
-
               <div>
                 <p className="text-sm text-gray-500">Delivered Orders</p>
                 <p className="mt-1 text-2xl font-bold text-[#54232A]">
@@ -316,7 +317,6 @@ export default function AdminDashboard() {
                 </p>
               </div>
             </div>
-
             <p className="mt-3 text-xs text-gray-500">
               Cancelled orders: {orders.cancelled_orders}
             </p>
@@ -330,7 +330,6 @@ export default function AdminDashboard() {
               <h2 className="text-lg font-bold text-[#54232A]">
                 Recent Orders
               </h2>
-
               <p className="mt-1 text-sm text-gray-500">
                 The latest orders placed by your customers.
               </p>
@@ -348,11 +347,9 @@ export default function AdminDashboard() {
                 className="mx-auto text-gray-300"
                 size={38}
               />
-
               <p className="mt-3 font-semibold text-[#54232A]">
                 No orders yet
               </p>
-
               <p className="mt-1 text-sm text-gray-500">
                 New customer orders will appear here.
               </p>
@@ -373,30 +370,22 @@ export default function AdminDashboard() {
 
                 <tbody className="divide-y divide-[#f1e8df]">
                   {recentOrders.map((order) => (
-                    <tr
-                      key={order.id}
-                      className="hover:bg-[#FCF9F5]"
-                    >
+                    <tr key={order.id} className="hover:bg-[#FCF9F5]">
                       <td className="px-5 py-4 font-semibold text-[#762C36]">
                         {order.order_number}
                       </td>
-
                       <td className="px-5 py-4 text-gray-700">
                         {order.customer_name}
                       </td>
-
                       <td className="whitespace-nowrap px-5 py-4 text-gray-500">
                         {formatDate(order.created_at)}
                       </td>
-
                       <td className="px-5 py-4 font-semibold text-[#54232A]">
                         {formatCurrency(order.total_amount)}
                       </td>
-
                       <td className="px-5 py-4 capitalize text-gray-600">
                         {order.payment_status}
                       </td>
-
                       <td className="px-5 py-4">
                         <span
                           className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${
