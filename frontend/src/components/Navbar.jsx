@@ -1,7 +1,9 @@
-import { useState } from 'react'
+
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Search,
+  Heart,
   ShoppingBag,
   Menu,
   X,
@@ -17,6 +19,7 @@ import {
 } from 'lucide-react'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
+import api from '../services/api'
 
 const navLinks = [
   { label: 'Home', href: '/' },
@@ -29,14 +32,65 @@ function Navbar() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [profileOpen, setProfileOpen] = useState(false)
+  const [wishlistCount, setWishlistCount] = useState(0)
 
   const location = useLocation()
   const navigate = useNavigate()
-
   const { cartCount } = useCart()
   const { user, isAuthenticated, isAdmin, logout } = useAuth()
 
+  const isCustomer = isAuthenticated && user?.role === 'customer'
   const accountPath = isAdmin ? '/admin/dashboard' : '/account'
+
+  // Load the wishlist count and listen for updates from the Shop page.
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadWishlistCount() {
+      if (!isCustomer) {
+        setWishlistCount(0)
+        return
+      }
+
+      try {
+        const response = await api.get('/wishlist')
+        const items = response.data?.data || []
+
+        if (!cancelled) {
+          setWishlistCount(items.length)
+        }
+      } catch (error) {
+        console.error('Failed to load wishlist count:', error)
+
+        if (!cancelled) {
+          setWishlistCount(0)
+        }
+      }
+    }
+
+    loadWishlistCount()
+
+    function handleWishlistUpdated(event) {
+      if (typeof event.detail?.count === 'number') {
+        setWishlistCount(event.detail.count)
+      } else {
+        loadWishlistCount()
+      }
+    }
+
+    window.addEventListener(
+      'kalakriti:wishlist-updated',
+      handleWishlistUpdated
+    )
+
+    return () => {
+      cancelled = true
+      window.removeEventListener(
+        'kalakriti:wishlist-updated',
+        handleWishlistUpdated
+      )
+    }
+  }, [isCustomer, user?.id, location.pathname])
 
   function closeMenu() {
     setMenuOpen(false)
@@ -233,7 +287,7 @@ function Navbar() {
             </nav>
           )}
 
-          {/* Search, cart and profile */}
+          {/* Search, wishlist, cart and profile */}
           <div className="flex shrink-0 items-center gap-3 sm:gap-4">
             {!isAdmin && (
               <>
@@ -249,6 +303,29 @@ function Navbar() {
                   {searchOpen ? <X size={21} /> : <Search size={21} />}
                 </button>
 
+                {/* Wishlist icon and count */}
+                {isCustomer && (
+                  <Link
+                    to="/wishlist"
+                    onClick={closeNavigationMenus}
+                    aria-label={`Wishlist, ${wishlistCount} saved products`}
+                    title="Wishlist"
+                    className="relative transition hover:text-gold"
+                  >
+                    <Heart
+                      size={21}
+                      fill={wishlistCount > 0 ? 'currentColor' : 'none'}
+                    />
+
+                    {wishlistCount > 0 && (
+                      <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-maroon px-1 text-[10px] text-white">
+                        {wishlistCount > 99 ? '99+' : wishlistCount}
+                      </span>
+                    )}
+                  </Link>
+                )}
+
+                {/* Cart icon and count */}
                 <Link
                   to="/cart"
                   aria-label={`Cart, ${cartCount} items`}
@@ -351,6 +428,22 @@ function Navbar() {
                           <Package size={17} />
                           My Orders
                         </Link>
+
+                        {isCustomer && (
+                          <Link
+                            to="/wishlist"
+                            onClick={closeNavigationMenus}
+                            className="flex items-center justify-between px-4 py-3 text-sm text-gray-700 hover:bg-ivory hover:text-maroon"
+                          >
+                            <span className="flex items-center gap-3">
+                              <Heart size={17} />
+                              Wishlist
+                            </span>
+                            <span className="rounded-full bg-maroon/10 px-2 py-1 text-xs text-maroon">
+                              {wishlistCount}
+                            </span>
+                          </Link>
+                        )}
                       </>
                     )}
 
@@ -439,6 +532,22 @@ function Navbar() {
                   </Link>
                 ))}
 
+                {isCustomer && (
+                  <Link
+                    to="/wishlist"
+                    onClick={closeMenu}
+                    className="flex items-center justify-between border-b border-gold/10 py-3 text-sm hover:text-maroon"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Heart size={17} />
+                      Wishlist
+                    </span>
+                    <span className="rounded-full bg-maroon/10 px-2 py-1 text-xs text-maroon">
+                      {wishlistCount} {wishlistCount === 1 ? 'item' : 'items'}
+                    </span>
+                  </Link>
+                )}
+
                 <Link
                   to="/cart"
                   onClick={closeMenu}
@@ -448,7 +557,6 @@ function Navbar() {
                     <ShoppingBag size={17} />
                     Cart
                   </span>
-
                   <span className="rounded-full bg-maroon/10 px-2 py-1 text-xs text-maroon">
                     {cartCount} items
                   </span>

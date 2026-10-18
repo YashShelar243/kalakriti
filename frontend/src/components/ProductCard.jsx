@@ -8,6 +8,7 @@ function ProductCard({
   onAddToCart,
   onToggleWishlist,
   isWishlisted = false,
+  wishlistLoading = false,
 }) {
   const { addToCart } = useCart()
 
@@ -35,12 +36,19 @@ function ProductCard({
   const handleAddToCart = () => {
     const result = addToCart(product)
 
-    alert(result.message)
-
-    // Call the optional parent callback after a successful addition.
-    if (result.success) {
-      onAddToCart?.(product)
+    if (!result?.success) {
+      alert(result?.message || 'Unable to add this product to your cart.')
+      return
     }
+
+    alert(result.message || 'Product added to your cart.')
+    onAddToCart?.(product)
+  }
+
+  const handleWishlistClick = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleWishlist?.(id)
   }
 
   return (
@@ -74,22 +82,32 @@ function ProductCard({
           </span>
         )}
 
+        {/* Wishlist heart button */}
         <button
           type="button"
-          onClick={() => onToggleWishlist?.(id)}
+          onClick={handleWishlistClick}
+          disabled={wishlistLoading}
           aria-label={
             isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'
           }
           aria-pressed={isWishlisted}
-          className={`absolute right-3 top-3 rounded-full p-2 shadow-sm transition ${
+          title={
+            isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'
+          }
+          className={`absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full shadow-sm transition ${
             isWishlisted
               ? 'bg-maroon text-white'
-              : 'bg-white/90 text-maroon hover:bg-maroon hover:text-white'
+              : 'bg-white/95 text-maroon hover:bg-maroon hover:text-white'
+          } ${
+            wishlistLoading
+              ? 'cursor-wait opacity-60'
+              : 'cursor-pointer'
           }`}
         >
           <Heart
-            size={17}
+            size={19}
             fill={isWishlisted ? 'currentColor' : 'none'}
+            className={wishlistLoading ? 'animate-pulse' : ''}
           />
         </button>
       </div>

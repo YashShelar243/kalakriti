@@ -10,6 +10,7 @@ import Checkout from "./pages/Checkout";
 
 import MyOrders from "./pages/customer/MyOrders";
 import MyProfile from "./pages/customer/MyProfile";
+import Wishlist from './pages/customer/Wishlist'
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import ManageOrders from "./pages/admin/ManageOrders";
@@ -46,6 +47,9 @@ function App() {
                 <Route path="/checkout" element={<Checkout />} />
                 <Route path="/my-orders" element={<MyOrders />} />
                 <Route path="/account" element={<MyProfile />} />
+                <Route element={<ProtectedRoute allowedRoles={['customer']} />}>
+  <Route path="/wishlist" element={<Wishlist />} />
+</Route>
               </Route>
 
               {/* Admin-only pages */}

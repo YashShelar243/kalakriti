@@ -1,28 +1,45 @@
 
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Search, SlidersHorizontal, X } from 'lucide-react'
+
 import ProductCard from '../components/ProductCard'
 import { fetchProducts, fetchCategories } from '../services/productService'
 import { useCart } from '../context/CartContext'
-import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import api from '../services/api'
 
 function Shop() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+
   const { addToCart } = useCart()
+  const { user, isAuthenticated } = useAuth()
 
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
+
   const [search, setSearch] = useState(
     () => searchParams.get('search') || ''
   )
+
   const [category, setCategory] = useState(
     () => searchParams.get('category') || 'all'
   )
+
   const [sort, setSort] = useState('newest')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // Wishlist state
+  const [wishlistIds, setWishlistIds] = useState(() => new Set())
+  const [wishlistLoadingIds, setWishlistLoadingIds] = useState(
+    () => new Set()
+  )
+  const [wishlistMessage, setWishlistMessage] = useState('')
+
+  const isCustomer =
+    isAuthenticated && user?.role === 'customer'
 
   // Synchronize search and category filters with the URL.
   useEffect(() => {
@@ -30,7 +47,7 @@ function Shop() {
     setCategory(searchParams.get('category') || 'all')
   }, [searchParams])
 
-  // Load products and categories from the backend.
+  // Load products and categories.
   useEffect(() => {
     let cancelled = false
 
@@ -52,7 +69,9 @@ function Shop() {
         console.error('Failed to load shop data:', err)
 
         if (!cancelled) {
-          setError('We could not load the collection. Please try again.')
+          setError(
+            'We could not load the collection. Please try again.'
+          )
         }
       } finally {
         if (!cancelled) {
@@ -68,7 +87,47 @@ function Shop() {
     }
   }, [])
 
-  // Resolve a category name or slug to the backend category slug.
+  // Load the logged-in customer's wishlist.
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadWishlist() {
+      if (!isCustomer) {
+        setWishlistIds(new Set())
+        return
+      }
+
+      try {
+        const response = await api.get('/wishlist')
+        const items = response.data?.data || []
+
+        if (!cancelled) {
+          const ids = new Set(
+            items.map((item) => Number(item.id))
+          )
+
+          setWishlistIds(ids)
+
+          // Synchronize the Navbar badge with the server.
+          window.dispatchEvent(
+            new CustomEvent('kalakriti:wishlist-updated', {
+              detail: { count: ids.size },
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to load wishlist:', err)
+      }
+    }
+
+    loadWishlist()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isCustomer, user?.id])
+
+  // Resolve the selected category.
   const selectedCategorySlug = useMemo(() => {
     if (category === 'all') return 'all'
 
@@ -153,8 +212,77 @@ function Shop() {
     navigate('/cart')
   }
 
-  function handleToggleWishlist(product) {
-    alert(`Wishlist functionality for ${product.name} will be added later.`)
+  // Notify the Navbar whenever the wishlist changes.
+  function notifyWishlistCount(count) {
+    window.dispatchEvent(
+      new CustomEvent('kalakriti:wishlist-updated', {
+        detail: { count },
+      })
+    )
+  }
+
+  // Add or remove a product from the wishlist.
+  async function handleToggleWishlist(productId) {
+    const id = Number(productId)
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return
+    }
+
+    if (!isCustomer) {
+      navigate('/login')
+      return
+    }
+
+    if (wishlistLoadingIds.has(id)) {
+      return
+    }
+
+    const alreadySaved = wishlistIds.has(id)
+
+    setWishlistMessage('')
+    setWishlistLoadingIds((previous) => new Set(previous).add(id))
+
+    try {
+      if (alreadySaved) {
+        await api.delete(`/wishlist/${id}`)
+
+        // Update local state and Navbar count.
+        setWishlistIds((previous) => {
+          const next = new Set(previous)
+          next.delete(id)
+          notifyWishlistCount(next.size)
+          return next
+        })
+
+        setWishlistMessage('Product removed from your wishlist.')
+      } else {
+        await api.post(`/wishlist/${id}`)
+
+        // Update local state and Navbar count.
+        setWishlistIds((previous) => {
+          const next = new Set(previous)
+          next.add(id)
+          notifyWishlistCount(next.size)
+          return next
+        })
+
+        setWishlistMessage('Product added to your wishlist.')
+      }
+    } catch (err) {
+      console.error('Failed to update wishlist:', err)
+
+      setWishlistMessage(
+        err.response?.data?.message ||
+          'Could not update your wishlist. Please try again.'
+      )
+    } finally {
+      setWishlistLoadingIds((previous) => {
+        const next = new Set(previous)
+        next.delete(id)
+        return next
+      })
+    }
   }
 
   return (
@@ -170,8 +298,8 @@ function Shop() {
           </h1>
 
           <p className="mt-4 max-w-2xl text-sm leading-6 text-burgundy/70 sm:text-base">
-            Discover thoughtful handmade treasures, traditional art, and
-            beautiful creations for your home and loved ones.
+            Discover thoughtful handmade treasures, traditional art,
+            and beautiful creations for your home and loved ones.
           </p>
         </div>
       </section>
@@ -209,9 +337,15 @@ function Shop() {
           </div>
 
           <div className="flex items-center gap-3">
-            <SlidersHorizontal size={18} className="text-maroon" />
+            <SlidersHorizontal
+              size={18}
+              className="text-maroon"
+            />
 
-            <label htmlFor="shop-sort" className="text-sm text-burgundy/70">
+            <label
+              htmlFor="shop-sort"
+              className="text-sm text-burgundy/70"
+            >
               Sort by
             </label>
 
@@ -258,6 +392,35 @@ function Shop() {
           ))}
         </div>
 
+        {wishlistMessage && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-burgundy/10 bg-ivory px-4 py-3 text-sm text-burgundy"
+          >
+            <span>{wishlistMessage}</span>
+
+            {isCustomer && (
+              <button
+                type="button"
+                onClick={() => navigate('/wishlist')}
+                className="font-semibold text-maroon underline underline-offset-4"
+              >
+                View Wishlist
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setWishlistMessage('')}
+              aria-label="Dismiss message"
+              className="text-burgundy/60 hover:text-maroon"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="py-20 text-center text-burgundy/70">
             Loading handmade creations...
@@ -296,7 +459,9 @@ function Shop() {
           <>
             <p className="mb-5 text-sm text-burgundy/60">
               Showing {filteredProducts.length}{' '}
-              {filteredProducts.length === 1 ? 'creation' : 'creations'}
+              {filteredProducts.length === 1
+                ? 'creation'
+                : 'creations'}
             </p>
 
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -305,7 +470,13 @@ function Shop() {
                   key={product.id}
                   product={product}
                   onAddToCart={() => handleAddToCart(product)}
-                  onToggleWishlist={() => handleToggleWishlist(product)}
+                  onToggleWishlist={() =>
+                    handleToggleWishlist(product.id)
+                  }
+                  isWishlisted={wishlistIds.has(Number(product.id))}
+                  wishlistLoading={wishlistLoadingIds.has(
+                    Number(product.id)
+                  )}
                 />
               ))}
             </div>

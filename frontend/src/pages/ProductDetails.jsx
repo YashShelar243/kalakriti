@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -17,6 +16,7 @@ import {
   Pencil,
   Trash2,
   MessageSquare,
+  Heart,
 } from 'lucide-react'
 
 import { fetchProductBySlug } from '../services/productService'
@@ -35,6 +35,12 @@ function ProductDetails() {
   const [error, setError] = useState('')
   const [cartMessage, setCartMessage] = useState(null)
 
+  // Wishlist
+  const [isWishlisted, setIsWishlisted] = useState(false)
+  const [wishlistLoading, setWishlistLoading] = useState(false)
+  const [wishlistChecking, setWishlistChecking] = useState(false)
+  const [wishlistMessage, setWishlistMessage] = useState('')
+
   // Reviews
   const [reviews, setReviews] = useState([])
   const [reviewSummary, setReviewSummary] = useState({
@@ -49,6 +55,7 @@ function ProductDetails() {
   const [editingReview, setEditingReview] = useState(false)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
 
+  // Load product details
   useEffect(() => {
     let cancelled = false
 
@@ -59,6 +66,7 @@ function ProductDetails() {
         setProduct(null)
         setQuantity(1)
         setCartMessage(null)
+        setWishlistMessage('')
 
         const data = await fetchProductBySlug(id)
 
@@ -89,6 +97,55 @@ function ProductDetails() {
     }
   }, [id])
 
+  // Check whether the customer has saved this product
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkWishlist() {
+      if (
+        !isAuthenticated ||
+        user?.role !== 'customer' ||
+        !product?.id
+      ) {
+        setIsWishlisted(false)
+        setWishlistChecking(false)
+        return
+      }
+
+      try {
+        setWishlistChecking(true)
+
+        const response = await api.get('/wishlist')
+        const items = response.data.data || []
+
+        if (!cancelled) {
+          setIsWishlisted(
+            items.some(
+              (item) => String(item.id) === String(product.id)
+            )
+          )
+        }
+      } catch (err) {
+        console.error('Failed to load wishlist:', err)
+
+        if (!cancelled) {
+          setIsWishlisted(false)
+        }
+      } finally {
+        if (!cancelled) {
+          setWishlistChecking(false)
+        }
+      }
+    }
+
+    checkWishlist()
+
+    return () => {
+      cancelled = true
+    }
+  }, [product?.id, isAuthenticated, user?.id, user?.role])
+
+  // Load product reviews
   const loadReviews = useCallback(async () => {
     if (!product?.id) return
 
@@ -131,6 +188,41 @@ function ProductDetails() {
     (review) => String(review.user_id) === String(user?.id)
   )
 
+  // Add or remove a product from the wishlist
+  async function handleToggleWishlist() {
+    if (!isAuthenticated || user?.role !== 'customer') {
+      setWishlistMessage(
+        'Please log in with your customer account to save favorites.'
+      )
+      return
+    }
+
+    if (!product?.id || wishlistLoading || wishlistChecking) return
+
+    try {
+      setWishlistLoading(true)
+      setWishlistMessage('')
+
+      if (isWishlisted) {
+        await api.delete(`/wishlist/${product.id}`)
+        setIsWishlisted(false)
+        setWishlistMessage('Removed from your wishlist.')
+      } else {
+        await api.post(`/wishlist/${product.id}`)
+        setIsWishlisted(true)
+        setWishlistMessage('Added to your wishlist.')
+      }
+    } catch (err) {
+      setWishlistMessage(
+        err.response?.data?.message ||
+          'Unable to update your wishlist. Please try again.'
+      )
+    } finally {
+      setWishlistLoading(false)
+    }
+  }
+
+  // Add product to cart
   function handleAddToCart() {
     if (!product || outOfStock) return
 
@@ -148,6 +240,7 @@ function ProductDetails() {
     })
   }
 
+  // Edit an existing review
   function startEditingReview() {
     if (!myReview) return
 
@@ -164,13 +257,14 @@ function ProductDetails() {
     setReviewMessage(null)
   }
 
+  // Create or update a review
   async function handleSubmitReview(event) {
     event.preventDefault()
 
-    if (!isAuthenticated) {
+    if (!isAuthenticated || user?.role !== 'customer') {
       setReviewMessage({
         success: false,
-        message: 'Please log in to submit a review.',
+        message: 'Please log in with your customer account to submit a review.',
       })
       return
     }
@@ -232,6 +326,7 @@ function ProductDetails() {
     }
   }
 
+  // Delete a review
   async function handleDeleteReview() {
     const confirmed = window.confirm(
       'Are you sure you want to delete your review?'
@@ -271,6 +366,7 @@ function ProductDetails() {
     }
   }
 
+  // Loading screen
   if (loading) {
     return (
       <main className="flex min-h-[60vh] items-center justify-center bg-warm-white px-4">
@@ -281,6 +377,7 @@ function ProductDetails() {
     )
   }
 
+  // Product not found
   if (error || !product) {
     return (
       <main className="flex min-h-[60vh] flex-col items-center justify-center bg-warm-white px-4 text-center">
@@ -311,6 +408,7 @@ function ProductDetails() {
         </Link>
 
         <div className="grid grid-cols-1 items-start gap-8 md:grid-cols-2 md:gap-12 lg:gap-16">
+          {/* Product image */}
           <div className="overflow-hidden rounded-2xl bg-ivory">
             {product.image_url ? (
               <img
@@ -328,14 +426,44 @@ function ProductDetails() {
             )}
           </div>
 
+          {/* Product information */}
           <div className="py-2 sm:py-5">
             <p className="text-xs uppercase tracking-[0.22em] text-gold">
               {product.category_name || 'Handcrafted with love'}
             </p>
 
-            <h1 className="mt-3 font-display text-3xl leading-tight text-burgundy sm:text-4xl lg:text-5xl">
-              {product.name}
-            </h1>
+            {/* Product title and wishlist button */}
+            <div className="mt-3 flex items-start justify-between gap-4">
+              <h1 className="font-display text-3xl leading-tight text-burgundy sm:text-4xl lg:text-5xl">
+                {product.name}
+              </h1>
+
+              <button
+                type="button"
+                onClick={handleToggleWishlist}
+                disabled={wishlistLoading || wishlistChecking}
+                aria-label={
+                  isWishlisted
+                    ? 'Remove from wishlist'
+                    : 'Add to wishlist'
+                }
+                aria-pressed={isWishlisted}
+                title={
+                  isWishlisted
+                    ? 'Remove from wishlist'
+                    : 'Add to wishlist'
+                }
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-burgundy/15 bg-white text-maroon transition hover:bg-ivory disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Heart
+                  size={23}
+                  fill={isWishlisted ? 'currentColor' : 'none'}
+                  className={
+                    isWishlisted ? 'text-red-600' : 'text-burgundy'
+                  }
+                />
+              </button>
+            </div>
 
             {product.is_featured && (
               <span className="mt-4 inline-block rounded-full bg-ivory px-4 py-1.5 text-xs text-maroon">
@@ -355,9 +483,7 @@ function ProductDetails() {
                 </span>
               </span>
 
-              <span>
-                ({reviewSummary.review_count} reviews)
-              </span>
+              <span>({reviewSummary.review_count} reviews)</span>
             </a>
 
             <p className="mt-5 text-2xl font-semibold text-maroon sm:text-3xl">
@@ -368,6 +494,7 @@ function ProductDetails() {
               })}
             </p>
 
+            {/* Product size */}
             {product.size && (
               <div className="mt-5 flex items-start gap-3 rounded-xl border border-burgundy/10 bg-ivory/60 p-4">
                 <Ruler
@@ -387,6 +514,7 @@ function ProductDetails() {
               </div>
             )}
 
+            {/* Description */}
             <div className="mt-5 border-t border-burgundy/10 pt-5">
               <h2 className="font-display text-lg text-burgundy">
                 About this creation
@@ -398,6 +526,7 @@ function ProductDetails() {
               </p>
             </div>
 
+            {/* Stock status */}
             <div className="mt-6">
               {outOfStock ? (
                 <p className="text-sm font-medium text-red-700">
@@ -414,6 +543,7 @@ function ProductDetails() {
               )}
             </div>
 
+            {/* Quantity and add to cart */}
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <div className="flex items-center rounded-full border border-burgundy/15">
                 <button
@@ -461,6 +591,7 @@ function ProductDetails() {
               </button>
             </div>
 
+            {/* Cart feedback */}
             {cartMessage && (
               <div
                 role="status"
@@ -507,9 +638,49 @@ function ProductDetails() {
               </div>
             )}
 
+            {/* Wishlist feedback */}
+            {wishlistMessage && (
+              <div
+                role="status"
+                className="mt-4 rounded-xl border border-burgundy/10 bg-ivory/60 p-4 text-sm text-burgundy"
+              >
+                <div className="flex items-center gap-2">
+                  <Heart
+                    size={17}
+                    className="shrink-0 text-maroon"
+                    fill={isWishlisted ? 'currentColor' : 'none'}
+                  />
+
+                  <span>{wishlistMessage}</span>
+
+                  {isWishlisted && (
+                    <Link
+                      to="/wishlist"
+                      className="ml-auto shrink-0 font-semibold underline underline-offset-4"
+                    >
+                      View wishlist
+                    </Link>
+                  )}
+                </div>
+
+                {!isAuthenticated && (
+                  <Link
+                    to="/login"
+                    className="mt-2 inline-block font-semibold underline underline-offset-4"
+                  >
+                    Log in
+                  </Link>
+                )}
+              </div>
+            )}
+
+            {/* Shopping benefits */}
             <div className="mt-8 grid grid-cols-1 gap-4 border-t border-burgundy/10 pt-6 sm:grid-cols-3">
               <div className="flex items-center gap-3 text-burgundy/70">
-                <PackageCheck size={21} className="shrink-0 text-gold" />
+                <PackageCheck
+                  size={21}
+                  className="shrink-0 text-gold"
+                />
                 <span className="text-xs">
                   Thoughtfully handcrafted
                 </span>
@@ -523,7 +694,10 @@ function ProductDetails() {
               </div>
 
               <div className="flex items-center gap-3 text-burgundy/70">
-                <ShieldCheck size={21} className="shrink-0 text-gold" />
+                <ShieldCheck
+                  size={21}
+                  className="shrink-0 text-gold"
+                />
                 <span className="text-xs">
                   Secure shopping experience
                 </span>
@@ -565,7 +739,8 @@ function ProductDetails() {
                         key={star}
                         size={16}
                         fill={
-                          star <= Math.round(
+                          star <=
+                          Math.round(
                             Number(reviewSummary.average_rating || 0)
                           )
                             ? 'currentColor'
@@ -583,6 +758,7 @@ function ProductDetails() {
             </div>
           </div>
 
+          {/* Review feedback */}
           {reviewMessage && (
             <div
               role="status"
@@ -644,7 +820,7 @@ function ProductDetails() {
                   </button>
                 </div>
               </div>
-            ) : isAuthenticated ? (
+            ) : isAuthenticated && user?.role === 'customer' ? (
               <form onSubmit={handleSubmitReview}>
                 <h3 className="font-display text-xl text-burgundy">
                   {editingReview ? 'Edit your review' : 'Write a review'}
@@ -845,6 +1021,7 @@ function ProductDetails() {
                               }
                             )
                           : ''}
+
                         {review.updated_at &&
                           review.created_at &&
                           new Date(review.updated_at).getTime() >

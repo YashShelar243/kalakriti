@@ -10,6 +10,7 @@ import adminRoutes from './routes/adminRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js'
 import categoryRoutes from './routes/categoryRoutes.js'
 import addressRoutes from './routes/addressRoutes.js'
+import wishlistRoutes from './routes/wishlistRoutes.js'
 
 dotenv.config()
 
@@ -55,6 +56,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/uploads', uploadRoutes)
 app.use('/api/admin/categories', categoryRoutes)
 app.use('/api/addresses', addressRoutes)
+app.use('/api/wishlist', wishlistRoutes)
 
 app.listen(PORT, () => {
   console.log(`KalaKriti API running at http://localhost:${PORT}`)
